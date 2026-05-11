@@ -1,3 +1,10 @@
+interface Route {
+  id: string;
+  points: [number, number][];
+  // ... autres propriétés
+  createdAt: Date;  // ← ajoute cette ligne
+}
+
 export interface Waypoint {
   id: string;
   lat: number;
