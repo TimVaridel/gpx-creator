@@ -1,10 +1,3 @@
-interface Route {
-  id: string;
-  points: [number, number][];
-  // ... autres propriétés
-  createdAt: Date;  // ← ajoute cette ligne
-}
-
 export interface Waypoint {
   id: string;
   lat: number;
@@ -19,6 +12,7 @@ export interface Route {
   waypoints: Waypoint[];
   totalDistance?: number;
   totalElevation?: number;
+  createdAt: Date;
 }
 
 export type DrawingMode = 'idle' | 'drawing' | 'editing';
