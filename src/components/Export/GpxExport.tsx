@@ -4,15 +4,18 @@ import { downloadGPX } from '../../utils/gpxGenerator';
 interface GpxExportProps {
   waypoints: Waypoint[];
   routeName: string;
+  routeGeometry?: [number, number][];
 }
 
-const GpxExport = ({ waypoints, routeName }: GpxExportProps) => {
+const GpxExport = ({ waypoints, routeName, routeGeometry }: GpxExportProps) => {
+  const hasGeometry = routeGeometry && routeGeometry.length > 0;
+
   const handleExport = () => {
     if (waypoints.length < 2) {
       alert('Ajoute au moins 2 points pour exporter un itinéraire !');
       return;
     }
-    downloadGPX(waypoints, routeName);
+    downloadGPX(waypoints, routeName, routeGeometry);
   };
 
   return (
@@ -29,7 +32,7 @@ const GpxExport = ({ waypoints, routeName }: GpxExportProps) => {
       `}
     >
       <span>⬇️</span>
-      Exporter en GPX
+      {hasGeometry ? 'Exporter GPX (trace calculée)' : 'Exporter GPX (points uniquement)'}
     </button>
   );
 };
