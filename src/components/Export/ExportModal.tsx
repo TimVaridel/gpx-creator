@@ -1,5 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import type { ExportOptions } from '../../utils/exportGenerator';
+
+const STORAGE_KEY = 'gpx-export-options';
 
 const PRESET_COLORS: { label: string; hex: string }[] = [
   { label: 'Bleu',   hex: '3b82f6' },
@@ -23,63 +25,117 @@ function isValidHex(hex: string): boolean {
   return /^[0-9a-fA-F]{6}$/.test(hex);
 }
 
+interface SavedPrefs {
+  format:       ExportOptions['format'];
+  includeStart: boolean;
+  includeEnd:   boolean;
+  includeVia:   boolean;
+  traceColor:   string;
+}
+
+function loadPrefs(): SavedPrefs {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) throw new Error();
+    return JSON.parse(raw) as SavedPrefs;
+  } catch {
+    return {
+      format:       'gpx',
+      includeStart: false,
+      includeEnd:   false,
+      includeVia:   false,
+      traceColor:   '3b82f6',
+    };
+  }
+}
+
+function savePrefs(p: SavedPrefs) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+}
+
 interface Props {
   onClose:       () => void;
   onExport:      (opts: ExportOptions) => void;
   waypointCount: number;
-  routeName:     string; // ← nouveau
+  routeName:     string;
 }
 
 export default function ExportModal({ onClose, onExport, waypointCount, routeName }: Props) {
-  const [format, setFormat]             = useState<ExportOptions['format']>('gpx');
-  const [includeStart, setIncludeStart] = useState(false);
-  const [includeEnd,   setIncludeEnd]   = useState(false);
-  const [includeVia,   setIncludeVia]   = useState(false);
-  const [hexInput, setHexInput]         = useState('3b82f6');
-  const [rgb, setRgb]                   = useState<[number, number, number]>([59, 130, 246]);
-  const [hexError, setHexError]         = useState(false);
+  const prefs = loadPrefs();
 
-  // Nom du fichier = routeName nettoyé
+  const [format,       setFormat]       = useState<ExportOptions['format']>(prefs.format);
+  const [includeStart, setIncludeStart] = useState(prefs.includeStart);
+  const [includeEnd,   setIncludeEnd]   = useState(prefs.includeEnd);
+  const [includeVia,   setIncludeVia]   = useState(prefs.includeVia);
+  const [hexInput,     setHexInput]     = useState(prefs.traceColor);
+  const [rgb,          setRgb]          = useState<[number, number, number]>(hexToRgb(prefs.traceColor));
+  const [hexError,     setHexError]     = useState(false);
+
   const safeFileName = routeName.trim().replace(/[/\\?%*:|"<>]/g, '-') || 'itinéraire';
-
   const hasVia = waypointCount > 2;
 
-  const handlePreset = useCallback((hex: string) => {
-    setHexInput(hex);
-    setRgb(hexToRgb(hex));
-    setHexError(false);
-  }, []);
-
-  const handleHexInput = useCallback((val: string) => {
-    setHexInput(val);
-    if (isValidHex(val)) {
-      setRgb(hexToRgb(val));
-      setHexError(false);
-    } else {
-      setHexError(true);
-    }
-  }, []);
-
-  const handleRgbChange = useCallback((channel: 0 | 1 | 2, val: number) => {
-    const next = [...rgb] as [number, number, number];
-    next[channel] = val;
-    setRgb(next);
-    setHexInput(rgbToHex(...next));
-    setHexError(false);
-  }, [rgb]);
-
-  const handleExport = useCallback(() => {
-    if (hexError || !isValidHex(hexInput)) return;
-    onExport({
+  // ── Persistance ────────────────────────────────────────
+  const persist = (patch: Partial<SavedPrefs>) => {
+    savePrefs({
       format,
       includeStart,
       includeEnd,
       includeVia,
       traceColor: hexInput,
+      ...patch,
     });
-    onClose();
-  }, [format, includeStart, includeEnd, includeVia, hexInput, hexError, onExport, onClose]);
+  };
 
+  // ── Handlers ───────────────────────────────────────────
+  const handleFormat = (f: ExportOptions['format']) => {
+    setFormat(f);
+    persist({ format: f });
+  };
+
+  const handleToggle = (
+    setter: React.Dispatch<React.SetStateAction<boolean>>,
+    key: keyof SavedPrefs,
+    val: boolean,
+  ) => {
+    setter(val);
+    persist({ [key]: val });
+  };
+
+  const handlePreset = (hex: string) => {
+    setHexInput(hex);
+    setRgb(hexToRgb(hex));
+    setHexError(false);
+    persist({ traceColor: hex });
+  };
+
+  const handleHexInput = (val: string) => {
+    setHexInput(val);
+    if (isValidHex(val)) {
+      setRgb(hexToRgb(val));
+      setHexError(false);
+      persist({ traceColor: val });
+    } else {
+      setHexError(true);
+    }
+  };
+
+  const handleRgbChange = (channel: 0 | 1 | 2, val: number) => {
+    const next = [...rgb] as [number, number, number];
+    next[channel] = val;
+    setRgb(next);
+    const hex = rgbToHex(...next);
+    setHexInput(hex);
+    setHexError(false);
+    persist({ traceColor: hex });
+  };
+
+  const handleExport = () => {
+    if (hexError || !isValidHex(hexInput)) return;
+    onExport({ format, includeStart, includeEnd, includeVia, traceColor: hexInput });
+    onClose();
+  };
+
+  // ── Sous-composant Toggle ──────────────────────────────
   const Toggle = ({
     value, onChange, disabled = false,
   }: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) => (
@@ -114,7 +170,7 @@ export default function ExportModal({ onClose, onExport, waypointCount, routeNam
           </button>
         </div>
 
-        {/* ── Nom du fichier (aperçu) ─────────────────────── */}
+        {/* Nom du fichier */}
         <section className="mb-5">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
             Nom du fichier
@@ -124,7 +180,7 @@ export default function ExportModal({ onClose, onExport, waypointCount, routeNam
           </div>
         </section>
 
-        {/* ── Format ─────────────────────────────────────── */}
+        {/* Format */}
         <section className="mb-5">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
             Format
@@ -132,7 +188,7 @@ export default function ExportModal({ onClose, onExport, waypointCount, routeNam
           <div className="flex gap-2">
             {(['gpx', 'kml', 'csv'] as const).map(f => (
               <button key={f}
-                onClick={() => setFormat(f)}
+                onClick={() => handleFormat(f)}
                 className={`flex-1 py-2 rounded-lg text-sm font-semibold border transition-colors
                   ${format === f
                     ? 'bg-blue-500 text-white border-blue-500'
@@ -143,19 +199,23 @@ export default function ExportModal({ onClose, onExport, waypointCount, routeNam
           </div>
         </section>
 
-        {/* ── Points à inclure ───────────────────────────── */}
+        {/* Points à inclure */}
         <section className="mb-5">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
             Points à inclure
           </p>
           <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-3">
             {([
-              { label: '🟢 Point de départ',   value: includeStart, setter: setIncludeStart, disabled: false },
-              { label: '🔵 Points de passage', value: includeVia,   setter: setIncludeVia,   disabled: !hasVia },
-              { label: "🔴 Point d'arrivée",   value: includeEnd,   setter: setIncludeEnd,   disabled: false },
-            ] as const).map(({ label, value, setter, disabled }) => (
+              { label: '🟢 Point de départ',   value: includeStart, setter: setIncludeStart, key: 'includeStart' as const, disabled: false },
+              { label: '🔵 Points de passage', value: includeVia,   setter: setIncludeVia,   key: 'includeVia'   as const, disabled: !hasVia },
+              { label: "🔴 Point d'arrivée",   value: includeEnd,   setter: setIncludeEnd,   key: 'includeEnd'   as const, disabled: false },
+            ]).map(({ label, value, setter, key, disabled }) => (
               <label key={label} className="flex items-center gap-3">
-                <Toggle value={value} onChange={setter} disabled={disabled} />
+                <Toggle
+                  value={value}
+                  onChange={v => handleToggle(setter, key, v)}
+                  disabled={disabled}
+                />
                 <span className={`text-sm ${disabled ? 'text-gray-400' : 'text-gray-700'}`}>
                   {label}
                   {disabled && (
@@ -167,13 +227,13 @@ export default function ExportModal({ onClose, onExport, waypointCount, routeNam
           </div>
         </section>
 
-        {/* ── Couleur de la trace ────────────────────────── */}
+        {/* Couleur de la trace */}
         <section className="mb-6">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
             Couleur de la trace
           </p>
 
-          {/* Presets */}
+          {/* Présets */}
           <div className="flex gap-2 mb-3 flex-wrap">
             {PRESET_COLORS.map(({ label, hex }) => (
               <button
@@ -203,7 +263,7 @@ export default function ExportModal({ onClose, onExport, waypointCount, routeNam
             ))}
           </div>
 
-          {/* Saisie HEX + aperçu */}
+          {/* Saisie HEX */}
           <div className="flex items-center gap-3">
             <div
               className="w-9 h-9 rounded-lg border border-gray-200 flex-shrink-0"
@@ -223,13 +283,11 @@ export default function ExportModal({ onClose, onExport, waypointCount, routeNam
                     : 'border-gray-200 focus:ring-blue-300'}`}
               />
             </div>
-            {hexError && (
-              <span className="text-xs text-red-500">Code invalide</span>
-            )}
+            {hexError && <span className="text-xs text-red-500">Code invalide</span>}
           </div>
         </section>
 
-        {/* ── Bouton export ──────────────────────────────── */}
+        {/* Bouton export */}
         <button
           onClick={handleExport}
           disabled={waypointCount < 2}
