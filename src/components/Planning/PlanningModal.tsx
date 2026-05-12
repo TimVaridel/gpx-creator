@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import type { Waypoint } from '../../types/route.types';
 
 // ── Types ────────────────────────────────────────────────────
@@ -239,42 +239,81 @@ const PlanningModal = ({
   };
 
   // ── Export Excel ──────────────────────────────────────────
-  const exportExcel = () => {
+  const exportExcel = async () => {
     const t = computedTimes();
-    const headers = [
-      'De', 'À', 'km', 'Durée [h]', 'Vitesse [km/h]',
-      'Date début', 'Fin', 'Pause [h]', 'Remarque',
+
+    const workbook  = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Planning');
+
+    // Colonnes
+    worksheet.columns = [
+      { header: 'De',             key: 'de',       width: 24 },
+      { header: 'À',              key: 'a',        width: 24 },
+      { header: 'km',             key: 'km',       width: 8  },
+      { header: 'Durée [h]',      key: 'duree',    width: 11 },
+      { header: 'Vitesse [km/h]', key: 'vitesse',  width: 15 },
+      { header: 'Date début',     key: 'debut',    width: 20 },
+      { header: 'Fin',            key: 'fin',      width: 20 },
+      { header: 'Pause [h]',      key: 'pause',    width: 11 },
+      { header: 'Remarque',       key: 'remarque', width: 32 },
     ];
 
-    const dataRows = rows.map((row, i) => {
+    // Style de l'en-tête
+    worksheet.getRow(1).eachCell(cell => {
+      cell.font      = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border    = {
+        bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
+      };
+    });
+
+    // Lignes de données
+    rows.forEach((row, i) => {
       const fromWp = waypoints[row.fromWpIndex];
       const toWp   = waypoints[row.toWpIndex];
       const dist   = routingDistanceKm(segmentDistances, row.fromWpIndex, row.toWpIndex);
       const ti     = t[i];
-      return [
-        wpLabel(fromWp, row.fromWpIndex),
-        wpLabel(toWp,   row.toWpIndex),
-        Math.round(dist * 10) / 10,
-        row.durationH,
-        row.speedKmh,
-        formatDateTimeCH(ti.beginDate, ti.beginTime),
-        formatDateTimeCH(ti.endDate,   ti.endTime),
-        row.pauseH,
-        row.remark,
-      ];
+
+      const excelRow = worksheet.addRow({
+        de:       wpLabel(fromWp, row.fromWpIndex),
+        a:        wpLabel(toWp,   row.toWpIndex),
+        km:       Math.round(dist * 10) / 10,
+        duree:    row.durationH,
+        vitesse:  row.speedKmh,
+        debut:    formatDateTimeCH(ti.beginDate, ti.beginTime),
+        fin:      formatDateTimeCH(ti.endDate,   ti.endTime),
+        pause:    row.pauseH,
+        remarque: row.remark,
+      });
+
+      // Alternance de couleur de fond
+      if (i % 2 === 0) {
+        excelRow.eachCell(cell => {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5FF' } };
+        });
+      }
+
+      // Alignement des colonnes numériques
+      ['km', 'duree', 'vitesse', 'pause'].forEach(key => {
+        excelRow.getCell(key).alignment = { horizontal: 'right' };
+      });
     });
 
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
-    ws['!cols'] = [
-      { wch: 22 }, { wch: 22 }, { wch: 8 }, { wch: 10 }, { wch: 14 },
-      { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 30 },
-    ];
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Planning');
+    // Génération et téléchargement
+    const buffer   = await workbook.xlsx.writeBuffer();
+    const blob     = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url      = URL.createObjectURL(blob);
+    const a        = document.createElement('a');
     const safeName = (routeName ?? 'itinéraire').replace(/[/\\?%*:|"<>]/g, '-');
-    XLSX.writeFile(wb, `${safeName} - planning.xlsx`);
+    a.href         = url;
+    a.download     = `${safeName} - planning.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
+
 
   // ── Render ────────────────────────────────────────────────
   const hasRoutingDist = segmentDistances.some(d => d > 0);
@@ -530,7 +569,7 @@ const PlanningModal = ({
               Fermer
             </button>
             <button
-              onClick={exportExcel}
+              onClick={() => { exportExcel(); }}
               disabled={rows.length === 0}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold
                          bg-green-500 text-white hover:bg-green-600 transition-colors
