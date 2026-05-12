@@ -1,7 +1,6 @@
 import type { Waypoint } from '../types/route.types';
 
-const ORS_API_KEY = import.meta.env.VITE_ORS_API_KEY;
-const ORS_URL = 'https://ors-proxy.varidel-timothee.workers.dev/';
+const OSRM_URL = 'https://router.project-osrm.org/route/v1';
 
 export type RoutingProfile = 'driving-car' | 'cycling-regular' | 'foot-walking';
 
@@ -11,46 +10,44 @@ export interface RouteGeometry {
   duration: number; // en secondes
 }
 
+const profileMap: Record<RoutingProfile, string> = {
+  'driving-car':      'driving',
+  'cycling-regular':  'bike',
+  'foot-walking':     'foot',
+};
+
 export async function getRoute(
   waypoints: Waypoint[],
   profile: RoutingProfile = 'driving-car'
 ): Promise<RouteGeometry | null> {
   if (waypoints.length < 2) return null;
 
-  // ── DEBUG ──────────────────────────────────────────────
-  console.log('🔑 API Key présente ?', !!ORS_API_KEY);
-  console.log('🔑 API Key (10 premiers car.):', ORS_API_KEY?.substring(0, 10));
-  console.log('🔑 Longueur clé:', ORS_API_KEY?.length);
-  console.log('📍 Waypoints envoyés:', waypoints);
-  // ───────────────────────────────────────────────────────
-
-  const coordinates = waypoints.map(wp => [wp.lng, wp.lat]);
+  const osrmProfile = profileMap[profile];
+  const coords = waypoints.map(wp => `${wp.lng},${wp.lat}`).join(';');
+  const url = `${OSRM_URL}/${osrmProfile}/${coords}?overview=full&geometries=geojson`;
 
   try {
-    const response = await fetch(`${ORS_URL}/${profile}/geojson`, {
-      method: 'POST',
-      headers: {
-        'Authorization': ORS_API_KEY,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ coordinates }),
-    });
-
-    console.log('📡 Status réponse:', response.status);
+    const response = await fetch(url);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('❌ Erreur ORS:', errorText);
+      console.error('❌ Erreur OSRM:', errorText);
       return null;
     }
 
     const data = await response.json();
-    const feature = data.features[0];
+
+    if (data.code !== 'Ok' || !data.routes?.[0]) {
+      console.error('❌ OSRM pas de route:', data.code);
+      return null;
+    }
+
+    const route = data.routes[0];
 
     return {
-      coordinates: feature.geometry.coordinates,
-      distance: feature.properties.summary.distance,
-      duration: feature.properties.summary.duration,
+      coordinates: route.geometry.coordinates,
+      distance:    route.distance,
+      duration:    route.duration,
     };
   } catch (error) {
     console.error('Erreur routing:', error);
