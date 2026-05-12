@@ -65,11 +65,6 @@ function App() {
     }
   };
 
-  // ── Export ───────────────────────────────────────────────
-  const handleExport = (opts: ExportOptions) => {
-    generateExport(route.waypoints, route.routeGeometry, route.name, opts);
-  };
-
   // ── Import ───────────────────────────────────────────────
   const handleImport = (parsed: ParsedRoute) => {
     if (
