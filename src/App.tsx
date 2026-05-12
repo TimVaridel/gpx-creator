@@ -37,6 +37,7 @@ function App() {
   const [showAddVia,        setShowAddVia]         = useState(false);
   const [mapLayer,          setMapLayer]           = useState<MapLayer>('osm');
   const [showTraffic,       setShowTraffic]        = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // ── Stats ────────────────────────────────────────────────
   const distanceKm = route.totalDistance
@@ -82,7 +83,7 @@ function App() {
     <div className="flex h-screen w-screen overflow-hidden bg-gray-100">
 
       {/* ── Sidebar gauche ── */}
-      <aside className="w-72 bg-white shadow-lg flex flex-col z-10">
+      <aside className={`relative bg-white shadow-lg flex flex-col z-10 transition-all duration-300 ${sidebarOpen ? 'w-72' : 'w-0 overflow-hidden'}`}>
 
         {/* Header compact */}
         <div className="bg-blue-600 text-white px-3 py-2.5 flex items-center justify-between">
@@ -313,6 +314,20 @@ function App() {
           </button>
         </div>
       </aside>
+
+      {/* Bouton toggle sidebar — toujours visible */}
+      <button
+        onClick={() => setSidebarOpen(o => !o)}
+        className={`fixed top-20 z-[1000] w-7 h-7 bg-white border border-gray-300
+                    rounded shadow-md flex items-center justify-center
+                    text-gray-600 hover:text-blue-500 hover:bg-blue-50 
+                    transition-all duration-300
+                    ${sidebarOpen ? 'left-[288px]' : 'left-2'}`}
+        title={sidebarOpen ? 'Réduire le panneau' : 'Ouvrir le panneau'}
+      >
+        {sidebarOpen ? '◀' : '▶'}
+      </button>
+
 
       {/* ── Carte ── */}
       <main className="flex-1 relative">
