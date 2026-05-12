@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import ExcelJS from 'exceljs';
 import type { Waypoint } from '../../types/route.types';
 
@@ -73,6 +73,10 @@ function wpLabel(wp: Waypoint | undefined, idx: number): string {
   return `Point ${idx + 1}`;
 }
 
+function wpOptionLabel(wp: Waypoint | undefined, idx: number): string {
+  return `${idx + 1} – ${wpLabel(wp, idx)}`;
+}
+
 function newRow(
   segmentDistances: number[],
   fromIdx: number,
@@ -100,7 +104,7 @@ const PlanningModal = ({
   routeName,
   onClose,
 }: PlanningModalProps) => {
-  const today      = new Date().toISOString().slice(0, 10);
+  const today       = new Date().toISOString().slice(0, 10);
   const backdropRef = useRef<HTMLDivElement>(null);
 
   const [globalDate, setGlobalDate] = useState<string>(() => {
@@ -141,21 +145,19 @@ const PlanningModal = ({
     );
   }, [globalDate, globalStart]);
 
-  // ── Adaptation si waypoints changent ─────────────────────
-  useEffect(() => {
+  // ── Rows dérivées (adaptation si waypoints changent) ─────
+  const displayedRows = useMemo(() => {
     const maxIdx = waypoints.length - 1;
-    setRows(prev =>
-      prev
-        .filter(r => r.fromWpIndex <= maxIdx && r.toWpIndex <= maxIdx)
-        .map(r => {
-          const dist      = routingDistanceKm(segmentDistances, r.fromWpIndex, r.toWpIndex);
-          const durationH = r.durationManual
-            ? r.durationH
-            : dist > 0 ? Math.round((dist / r.speedKmh) * 100) / 100 : 0;
-          return { ...r, durationH };
-        }),
-    );
-  }, [waypoints.length, segmentDistances]);
+    return rows
+      .filter(r => r.fromWpIndex <= maxIdx && r.toWpIndex <= maxIdx)
+      .map(r => {
+        const dist      = routingDistanceKm(segmentDistances, r.fromWpIndex, r.toWpIndex);
+        const durationH = r.durationManual
+          ? r.durationH
+          : dist > 0 ? Math.round((dist / r.speedKmh) * 100) / 100 : 0;
+        return { ...r, durationH };
+      });
+  }, [rows, waypoints.length, segmentDistances]);
 
   // ── Calcul des horaires ───────────────────────────────────
   const computedTimes = useCallback(() => {
@@ -165,7 +167,7 @@ const PlanningModal = ({
     }[] = [];
     let curDate = globalDate;
     let curTime = globalStart;
-    for (const row of rows) {
+    for (const row of displayedRows) {
       const beginDate = curDate;
       const beginTime = curTime;
       const endDt = addHoursToDateTime(beginDate, beginTime, row.durationH);
@@ -175,7 +177,7 @@ const PlanningModal = ({
       curTime = nextDt.time;
     }
     return times;
-  }, [rows, globalDate, globalStart]);
+  }, [displayedRows, globalDate, globalStart]);
 
   const times = computedTimes();
 
@@ -227,17 +229,6 @@ const PlanningModal = ({
     );
   };
 
-  const resetDuration = (id: string) => {
-    setRows(prev =>
-      prev.map(r => {
-        if (r.id !== id) return r;
-        const dist      = routingDistanceKm(segmentDistances, r.fromWpIndex, r.toWpIndex);
-        const durationH = dist > 0 ? Math.round((dist / r.speedKmh) * 100) / 100 : 0;
-        return { ...r, durationManual: false, durationH };
-      }),
-    );
-  };
-
   // ── Export Excel ──────────────────────────────────────────
   const exportExcel = async () => {
     const t = computedTimes();
@@ -245,7 +236,6 @@ const PlanningModal = ({
     const workbook  = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Planning');
 
-    // Colonnes
     worksheet.columns = [
       { header: 'De',             key: 'de',       width: 24 },
       { header: 'À',              key: 'a',        width: 24 },
@@ -258,26 +248,20 @@ const PlanningModal = ({
       { header: 'Remarque',       key: 'remarque', width: 32 },
     ];
 
-    // Style de l'en-tête
     worksheet.getRow(1).eachCell(cell => {
       cell.font      = { bold: true, color: { argb: 'FFFFFFFF' } };
       cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
       cell.alignment = { horizontal: 'center', vertical: 'middle' };
-      cell.border    = {
-        bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-      };
+      cell.border    = { bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } } };
     });
 
-    // Lignes de données
-    rows.forEach((row, i) => {
-      const fromWp = waypoints[row.fromWpIndex];
-      const toWp   = waypoints[row.toWpIndex];
-      const dist   = routingDistanceKm(segmentDistances, row.fromWpIndex, row.toWpIndex);
-      const ti     = t[i];
+    displayedRows.forEach((row, i) => {
+      const dist = routingDistanceKm(segmentDistances, row.fromWpIndex, row.toWpIndex);
+      const ti   = t[i];
 
       const excelRow = worksheet.addRow({
-        de:       wpLabel(fromWp, row.fromWpIndex),
-        a:        wpLabel(toWp,   row.toWpIndex),
+        de:       wpLabel(waypoints[row.fromWpIndex], row.fromWpIndex),
+        a:        wpLabel(waypoints[row.toWpIndex],   row.toWpIndex),
         km:       Math.round(dist * 10) / 10,
         duree:    row.durationH,
         vitesse:  row.speedKmh,
@@ -287,33 +271,29 @@ const PlanningModal = ({
         remarque: row.remark,
       });
 
-      // Alternance de couleur de fond
       if (i % 2 === 0) {
         excelRow.eachCell(cell => {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5FF' } };
         });
       }
 
-      // Alignement des colonnes numériques
       ['km', 'duree', 'vitesse', 'pause'].forEach(key => {
         excelRow.getCell(key).alignment = { horizontal: 'right' };
       });
     });
 
-    // Génération et téléchargement
     const buffer   = await workbook.xlsx.writeBuffer();
     const blob     = new Blob([buffer], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });
     const url      = URL.createObjectURL(blob);
     const a        = document.createElement('a');
-    const safeName = (routeName ?? 'itinéraire').replace(/[/\\?%*:|"<>]/g, '-');
+    const safeName = (routeName ?? 'itinéraire').replace(/[\/\\?%*:|"<>]/g, '-');
     a.href         = url;
     a.download     = `${safeName} - planning.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
   };
-
 
   // ── Render ────────────────────────────────────────────────
   const hasRoutingDist = segmentDistances.some(d => d > 0);
@@ -371,7 +351,7 @@ const PlanningModal = ({
 
         {/* Tableau */}
         <div className="flex-1 overflow-auto px-6 py-4">
-          {rows.length === 0 ? (
+          {displayedRows.length === 0 ? (
             <div className="text-center text-gray-400 py-16">
               <p className="text-4xl mb-3">🗓️</p>
               <p className="text-sm">Aucune étape. Cliquez sur « + Ajouter une étape ».</p>
@@ -394,10 +374,8 @@ const PlanningModal = ({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, i) => {
-                  const fromWp = waypoints[row.fromWpIndex];
-                  const toWp   = waypoints[row.toWpIndex];
-                  const dist   = routingDistanceKm(
+                {displayedRows.map((row, i) => {
+                  const dist = routingDistanceKm(
                     segmentDistances,
                     row.fromWpIndex,
                     row.toWpIndex,
@@ -412,38 +390,28 @@ const PlanningModal = ({
 
                       {/* De */}
                       <td className="px-2 py-2">
-                        <div className="flex flex-col gap-0.5">
-                          <select
-                            value={row.fromWpIndex}
-                            onChange={e => updateRow(row.id, { fromWpIndex: Number(e.target.value) })}
-                            className="border border-gray-200 rounded px-1 py-0.5 text-xs w-14"
-                          >
-                            {waypoints.map((_, idx) => (
-                              <option key={idx} value={idx}>{idx + 1}</option>
-                            ))}
-                          </select>
-                          <span className="text-[10px] text-gray-400 truncate max-w-[120px]">
-                            {wpLabel(fromWp, row.fromWpIndex)}
-                          </span>
-                        </div>
+                        <select
+                          value={row.fromWpIndex}
+                          onChange={e => updateRow(row.id, { fromWpIndex: Number(e.target.value) })}
+                          className="border border-gray-200 rounded px-1 py-0.5 text-xs"
+                        >
+                          {waypoints.map((wp, idx) => (
+                            <option key={idx} value={idx}>{wpOptionLabel(wp, idx)}</option>
+                          ))}
+                        </select>
                       </td>
 
                       {/* À */}
                       <td className="px-2 py-2">
-                        <div className="flex flex-col gap-0.5">
-                          <select
-                            value={row.toWpIndex}
-                            onChange={e => updateRow(row.id, { toWpIndex: Number(e.target.value) })}
-                            className="border border-gray-200 rounded px-1 py-0.5 text-xs w-14"
-                          >
-                            {waypoints.map((_, idx) => (
-                              <option key={idx} value={idx}>{idx + 1}</option>
-                            ))}
-                          </select>
-                          <span className="text-[10px] text-gray-400 truncate max-w-[120px]">
-                            {wpLabel(toWp, row.toWpIndex)}
-                          </span>
-                        </div>
+                        <select
+                          value={row.toWpIndex}
+                          onChange={e => updateRow(row.id, { toWpIndex: Number(e.target.value) })}
+                          className="border border-gray-200 rounded px-1 py-0.5 text-xs"
+                        >
+                          {waypoints.map((wp, idx) => (
+                            <option key={idx} value={idx}>{wpOptionLabel(wp, idx)}</option>
+                          ))}
+                        </select>
                       </td>
 
                       {/* km */}
@@ -453,29 +421,18 @@ const PlanningModal = ({
 
                       {/* Durée */}
                       <td className="px-2 py-2 text-right">
-                        <div className="flex items-center gap-1 justify-end">
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.25"
-                            value={row.durationH}
-                            onChange={e => updateRow(row.id, { durationH: Number(e.target.value) })}
-                            className={`border rounded px-1 py-0.5 text-xs text-right w-16
-                              focus:border-indigo-400 focus:outline-none
-                              ${row.durationManual
-                                ? 'border-indigo-300 bg-indigo-50'
-                                : 'border-gray-200'}`}
-                          />
-                          {row.durationManual && (
-                            <button
-                              onClick={() => resetDuration(row.id)}
-                              title="Recalculer automatiquement"
-                              className="text-gray-300 hover:text-indigo-500 text-xs"
-                            >
-                              ↺
-                            </button>
-                          )}
-                        </div>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.25"
+                          value={row.durationH}
+                          onChange={e => updateRow(row.id, { durationH: Number(e.target.value) })}
+                          className={`border rounded px-1 py-0.5 text-xs text-right w-16
+                            focus:border-indigo-400 focus:outline-none
+                            ${row.durationManual
+                              ? 'border-indigo-300 bg-indigo-50'
+                              : 'border-gray-200'}`}
+                        />
                       </td>
 
                       {/* Vitesse — lecture seule */}
@@ -569,8 +526,8 @@ const PlanningModal = ({
               Fermer
             </button>
             <button
-              onClick={() => { exportExcel(); }}
-              disabled={rows.length === 0}
+              onClick={exportExcel}
+              disabled={displayedRows.length === 0}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold
                          bg-green-500 text-white hover:bg-green-600 transition-colors
                          disabled:opacity-40 disabled:cursor-not-allowed shadow-md"
