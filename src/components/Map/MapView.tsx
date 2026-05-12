@@ -9,6 +9,7 @@ import {
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { Waypoint } from '../../types/route.types';
+import type { MapLayer } from '../../App';
 
 // ── Fix icônes Leaflet ───────────────────────────────────────
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -22,9 +23,7 @@ L.Icon.Default.mergeOptions({
 const createNumberedIcon = (index: number, total: number, direct = false) => {
   const isStart = index === 0;
   const isEnd   = index === total - 1;
-  // Points directs = violet, start = vert, end = rouge, via = bleu
   const bg = isStart ? '#22c55e' : isEnd ? '#ef4444' : direct ? '#a855f7' : '#3b82f6';
-  const label = index + 1;
 
   return new L.DivIcon({
     className: '',
@@ -45,7 +44,7 @@ const createNumberedIcon = (index: number, total: number, direct = false) => {
           color:white;font-size:11px;font-weight:bold;
           font-family:sans-serif;line-height:20px;
           pointer-events:none;
-        ">${label}</div>
+        ">${index + 1}</div>
         ${direct && !isStart && !isEnd ? `
         <div style="
           position:absolute;bottom:-2px;left:50%;transform:translateX(-50%);
@@ -70,25 +69,19 @@ interface ContextMenuProps {
 
 const ContextMenu = ({ x, y, onAction, onClose }: ContextMenuProps) => (
   <>
-    <div className="fixed inset-0 z-[999]" onClick={onClose} />
+    <div className="fixed inset-0 z-[1000]" onClick={onClose} />
     <ul
-      className="fixed z-[1000] bg-white border border-gray-200 rounded-xl
-                 shadow-xl py-1 min-w-[250px] text-sm overflow-hidden"
+      className="fixed z-[1001] bg-white rounded-xl shadow-2xl border border-gray-100
+                 py-1 min-w-[220px] text-sm text-gray-700 overflow-hidden"
       style={{ left: x, top: y }}
     >
-      {/* Itinéraire à partir de ce point */}
       <li
         className="px-4 py-2.5 hover:bg-green-50 cursor-pointer flex items-center gap-2.5"
         onClick={() => { onAction('start'); onClose(); }}
       >
         <span className="w-3 h-3 rounded-full bg-green-500 flex-shrink-0" />
-        Itinéraire à partir de ce point
+        Définir comme point de départ
       </li>
-
-      {/* Séparateur */}
-      <li className="border-t border-gray-100 my-1" />
-
-      {/* Ajouter un point de passage */}
       <li
         className="px-4 py-2.5 hover:bg-blue-50 cursor-pointer flex items-center gap-2.5"
         onClick={() => { onAction('via'); onClose(); }}
@@ -96,8 +89,6 @@ const ContextMenu = ({ x, y, onAction, onClose }: ContextMenuProps) => (
         <span className="w-3 h-3 rounded-full bg-blue-400 flex-shrink-0" />
         Ajouter un point de passage
       </li>
-
-      {/* Ajouter un point de passage direct */}
       <li
         className="px-4 py-2.5 hover:bg-purple-50 cursor-pointer flex items-center gap-2.5"
         onClick={() => { onAction('via-direct'); onClose(); }}
@@ -109,11 +100,7 @@ const ContextMenu = ({ x, y, onAction, onClose }: ContextMenuProps) => (
           ligne droite
         </span>
       </li>
-
-      {/* Séparateur */}
       <li className="border-t border-gray-100 my-1" />
-
-      {/* Itinéraire jusqu'à ce point */}
       <li
         className="px-4 py-2.5 hover:bg-red-50 cursor-pointer flex items-center gap-2.5"
         onClick={() => { onAction('end'); onClose(); }}
@@ -125,7 +112,7 @@ const ContextMenu = ({ x, y, onAction, onClose }: ContextMenuProps) => (
   </>
 );
 
-// ── Gestionnaire clics carte ─────────────────────────────────
+// ── Gestionnaire événements carte ────────────────────────────
 interface MapEventsHandlerProps {
   onContextMenu: (lat: number, lng: number, x: number, y: number) => void;
 }
@@ -164,7 +151,7 @@ function findClosestSegmentIndex(
   let bestDist    = Infinity;
 
   for (let i = 0; i < waypoints.length; i++) {
-    let minWpDist   = Infinity;
+    let minWpDist    = Infinity;
     let closestForWp = 0;
     for (let j = 0; j < geometry.length; j++) {
       const d = Math.sqrt(
@@ -185,47 +172,145 @@ function findClosestSegmentIndex(
   return Math.min(bestWpIndex + 1, waypoints.length);
 }
 
-// ── Polyline draggable ───────────────────────────────────────
+// ── Calcul distance cumulée ──────────────────────────────────
+function cumulativeDistAtClick(
+  clickLatLng: L.LatLng,
+  geometry: [number, number][],
+  map: L.Map,
+): number {
+  let minDist    = Infinity;
+  let closestIdx = 0;
+
+  for (let i = 0; i < geometry.length; i++) {
+    const p     = map.latLngToLayerPoint(L.latLng(geometry[i][0], geometry[i][1]));
+    const click = map.latLngToLayerPoint(clickLatLng);
+    const d     = p.distanceTo(click);
+    if (d < minDist) { minDist = d; closestIdx = i; }
+  }
+
+  let cumul = 0;
+  for (let i = 1; i <= closestIdx; i++) {
+    const a = L.latLng(geometry[i - 1][0], geometry[i - 1][1]);
+    const b = L.latLng(geometry[i][0],     geometry[i][1]);
+    cumul += a.distanceTo(b);
+  }
+  return cumul;
+}
+
+// ── Config fonds de carte ────────────────────────────────────
+const TILE_LAYERS: Record<MapLayer, { url: string; attribution: string; maxZoom?: number }> = {
+  osm: {
+    url:         'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  },
+  'google-road': {
+    url:         'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+    attribution: '© <a href="https://maps.google.com">Google Maps</a>',
+    maxZoom:     21,
+  },
+  'google-hybrid': {
+    url:         'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+    attribution: '© <a href="https://maps.google.com">Google Maps</a>',
+    maxZoom:     22,
+  },
+  'google-terrain': {
+    url:         'https://mt{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}',
+    attribution: '© <a href="https://maps.google.com">Google Maps</a>',
+    maxZoom:     21,
+  },
+};
+
+const GOOGLE_SUBDOMAINS = ['0', '1', '2', '3'];
+
+const TRAFFIC_LAYER = {
+  url:     'https://mt{s}.google.com/vt/lyrs=h,traffic&x={x}&y={y}&z={z}',
+  attribution: '',
+  maxZoom: 21,
+};
+
+// ── Polyline draggable + tooltip hover ───────────────────────
 interface DraggablePolylineProps {
-  geometry: [number, number][];
-  waypoints: Waypoint[];
-  onInsert: (lat: number, lng: number, atIndex: number) => void;
+  geometry:         [number, number][];
+  waypoints:        Waypoint[];
+  onInsert:         (lat: number, lng: number, atIndex: number) => void;
   suppressClickRef: React.MutableRefObject<number>;
 }
 
 const DraggablePolyline = ({
   geometry, waypoints, onInsert, suppressClickRef,
 }: DraggablePolylineProps) => {
-  const map = useMapEvents({});
+  const map            = useMapEvents({});
   const [isDragging, setIsDragging] = useState(false);
   const [ghostPos, setGhostPos]     = useState<[number, number] | null>(null);
-  const insertIndexRef              = useRef<number>(0);
+  const insertIndexRef = useRef<number>(0);
+  const popupRef       = useRef<L.Popup | null>(null);
 
+  // ── Popup hover ──────────────────────────────────────────
+  const openHoverPopup = useCallback((latlng: L.LatLng) => {
+    const distKm = (cumulativeDistAtClick(latlng, geometry, map) / 1000).toFixed(1);
+
+    if (!popupRef.current) {
+      popupRef.current = L.popup({
+        closeButton:  false,
+        offset:       [0, -4],
+        className:    'dist-popup',
+        autoClose:    false,
+        closeOnClick: false,
+      });
+    }
+
+    popupRef.current
+      .setLatLng(latlng)
+      .setContent(
+        `<div style="font-size:12px;font-weight:600;white-space:nowrap;padding:2px 4px;">
+           📍 ${distKm} km depuis le départ
+         </div>`,
+      )
+      .openOn(map);
+  }, [map, geometry]);
+
+  const closeHoverPopup = useCallback(() => {
+    if (popupRef.current) map.closePopup(popupRef.current);
+  }, [map]);
+
+  // ── Handlers polyline ────────────────────────────────────
+  const handleMouseMove = useCallback((e: L.LeafletMouseEvent) => {
+    if (!isDragging) openHoverPopup(e.latlng);
+  }, [isDragging, openHoverPopup]);
+
+  const handleMouseOut = useCallback(() => {
+    closeHoverPopup();
+  }, [closeHoverPopup]);
+
+  // ── Drag sans délai ──────────────────────────────────────
   const handleMouseDown = useCallback((e: L.LeafletMouseEvent) => {
     e.originalEvent.stopPropagation();
+
+    insertIndexRef.current = findClosestSegmentIndex(e.latlng, geometry, waypoints, map);
+
+    closeHoverPopup();
     map.dragging.disable();
     setIsDragging(true);
-
-    const idx = findClosestSegmentIndex(e.latlng, geometry, waypoints, map);
-    insertIndexRef.current = idx;
     setGhostPos([e.latlng.lat, e.latlng.lng]);
 
-    const onMouseMove = (ev: L.LeafletMouseEvent) => {
+    const mouseMoveHandler = (ev: L.LeafletMouseEvent) => {
       setGhostPos([ev.latlng.lat, ev.latlng.lng]);
     };
-    const onMouseUp = (ev: L.LeafletMouseEvent) => {
+
+    const mouseUpHandler = (ev: L.LeafletMouseEvent) => {
       map.dragging.enable();
       setIsDragging(false);
       setGhostPos(null);
       suppressClickRef.current = Date.now();
       onInsert(ev.latlng.lat, ev.latlng.lng, insertIndexRef.current);
-      map.off('mousemove', onMouseMove);
-      map.off('mouseup',   onMouseUp);
+      map.off('mousemove', mouseMoveHandler);
+      map.off('mouseup',   mouseUpHandler);
     };
 
-    map.on('mousemove', onMouseMove);
-    map.on('mouseup',   onMouseUp);
-  }, [map, geometry, waypoints, onInsert, suppressClickRef]);
+    map.on('mousemove', mouseMoveHandler);
+    map.on('mouseup',   mouseUpHandler);
+
+  }, [map, geometry, waypoints, onInsert, suppressClickRef, closeHoverPopup]);
 
   return (
     <>
@@ -233,72 +318,95 @@ const DraggablePolyline = ({
         positions={geometry}
         color="#3b82f6"
         weight={5}
-        opacity={0.8}
-        eventHandlers={{ mousedown: handleMouseDown }}
-      />
-      {/* Zone de clic élargie (invisible) */}
-      <Polyline
-        positions={geometry}
-        color="transparent"
-        weight={15}
-        opacity={0}
-        eventHandlers={{ mousedown: handleMouseDown }}
+        opacity={0.85}
+        eventHandlers={{
+          mousedown: handleMouseDown,
+          mousemove: handleMouseMove,
+          mouseout:  handleMouseOut,
+        }}
       />
       {isDragging && ghostPos && (
         <Marker
           position={ghostPos}
-          icon={new L.Icon({
-            iconUrl:   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-            iconSize:  [25, 41], iconAnchor: [12, 41],
-            className: 'opacity-60',
+          icon={new L.DivIcon({
+            className: '',
+            html: `<div style="
+              width:16px;height:16px;
+              background:#3b82f6;
+              border:3px solid white;
+              border-radius:50%;
+              box-shadow:0 2px 8px rgba(0,0,0,0.4);
+              transform:translate(-50%,-50%);
+            "></div>`,
+            iconSize:   [0, 0],
+            iconAnchor: [0, 0],
           })}
+          interactive={false}
         />
       )}
     </>
   );
 };
 
-// ── Props MapView ────────────────────────────────────────────
+// ── Composant principal ──────────────────────────────────────
 interface MapViewProps {
-  waypoints: Waypoint[];
-  routeGeometry?: [number, number][];
-  onMarkerDragEnd: (id: string, lat: number, lng: number) => void;
-  onInsertOnRoute: (lat: number, lng: number, atIndex: number) => void;
+  waypoints:           Waypoint[];
+  routeGeometry?:      [number, number][];
+  onMarkerDragEnd:     (id: string, lat: number, lng: number) => void;
+  onInsertOnRoute:     (lat: number, lng: number, atIndex: number) => void;
   onContextMenuAction: (action: ContextAction, lat: number, lng: number) => void;
+  mapLayer:            MapLayer;
+  showTraffic:         boolean;
 }
 
-// ── Composant principal ──────────────────────────────────────
 const MapView = ({
   waypoints,
   routeGeometry,
   onMarkerDragEnd,
   onInsertOnRoute,
   onContextMenuAction,
+  mapLayer,
+  showTraffic,
 }: MapViewProps) => {
+  const suppressClickRef = useRef<number>(0);
   const [contextMenu, setContextMenu] = useState<{
     lat: number; lng: number; x: number; y: number;
   } | null>(null);
 
-  const suppressClickRef = useRef<number>(0);
+  const handleContextMenu = useCallback((
+    lat: number, lng: number, x: number, y: number,
+  ) => {
+    setContextMenu({ lat, lng, x, y });
+  }, []);
 
   return (
-    <div className="h-full w-full relative">
+    <div className="w-full h-full relative">
       <MapContainer
-        center={[46.603354, 1.888334]}
-        zoom={6}
-        className="h-full w-full"
+        center={[46.8, 8.3]}
+        zoom={8}
+        className="w-full h-full"
+        zoomControl={true}
       >
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          key={mapLayer}
+          attribution={TILE_LAYERS[mapLayer].attribution}
+          url={TILE_LAYERS[mapLayer].url}
+          maxZoom={TILE_LAYERS[mapLayer].maxZoom ?? 19}
+          subdomains={mapLayer === 'osm' ? 'abc' : GOOGLE_SUBDOMAINS}
         />
+        {showTraffic && (
+          <TileLayer
+            key="traffic"
+            url={TRAFFIC_LAYER.url}
+            maxZoom={TRAFFIC_LAYER.maxZoom}
+            subdomains={GOOGLE_SUBDOMAINS}
+            opacity={0.8}
+          />
+        )}
 
-        <MapEventsHandler
-          onContextMenu={(lat, lng, x, y) => setContextMenu({ lat, lng, x, y })}
-        />
+        <MapEventsHandler onContextMenu={handleContextMenu} />
 
-        {/* Tracé calculé avec drag-to-insert */}
+        {/* Tracé routé draggable */}
         {routeGeometry && routeGeometry.length > 0 && (
           <DraggablePolyline
             geometry={routeGeometry}
@@ -328,7 +436,7 @@ const MapView = ({
             draggable={true}
             eventHandlers={{
               dragstart: () => { suppressClickRef.current = Date.now(); },
-              dragend: (e) => {
+              dragend:   (e) => {
                 suppressClickRef.current = Date.now();
                 const { lat, lng } = (e.target as L.Marker).getLatLng();
                 onMarkerDragEnd(wp.id, lat, lng);

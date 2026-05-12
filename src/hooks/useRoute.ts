@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Waypoint, Route, RoutingProfile } from '../types/route.types';
 import { getRoute } from '../services/routingService';
+import { reverseGeocode } from '../services/geocoding';
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
@@ -16,6 +17,33 @@ function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number)
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function computeGeometryLength(geometry: [number, number][]): number {
+  let total = 0;
+  for (let i = 1; i < geometry.length; i++) {
+    total += haversineMeters(
+      geometry[i - 1][0], geometry[i - 1][1],
+      geometry[i][0],     geometry[i][1],
+    );
+  }
+  return total;
+}
+
+async function enrichWithLocality(
+  id: string,
+  lat: number,
+  lng: number,
+  setRoute: React.Dispatch<React.SetStateAction<Route>>,
+) {
+  const locality = await reverseGeocode(lat, lng);
+  if (!locality) return;
+  setRoute(prev => ({
+    ...prev,
+    waypoints: prev.waypoints.map(wp =>
+      wp.id === id ? { ...wp, locality } : wp,
+    ),
+  }));
+}
+
 export const useRoute = () => {
   const [route, setRoute] = useState<Route>({
     id: generateId(),
@@ -26,13 +54,13 @@ export const useRoute = () => {
     profile: 'driving-car',
   });
 
-  const [isCalculating, setIsCalculating] = useState(false);
-  const [autoCalculate, setAutoCalculate] = useState(false);
+  const [isCalculating,    setIsCalculating]    = useState(false);
+  const [autoCalculate,    setAutoCalculate]    = useState(false);
+  const [segmentDistances, setSegmentDistances] = useState<number[]>([]);
 
   const waypointsRef = useRef(route.waypoints);
   const profileRef   = useRef(route.profile);
 
-  // ── Calcul segmenté (direct ou routé) ───────────────────
   const calculateRoute = useCallback(async (
     waypoints: Waypoint[],
     profile: RoutingProfile,
@@ -44,12 +72,14 @@ export const useRoute = () => {
         totalDistance: 0,
         duration: 0,
       }));
+      setSegmentDistances([]);
       return;
     }
 
     setIsCalculating(true);
 
     const allSegments: [number, number][][] = [];
+    const segDists: number[] = new Array(waypoints.length).fill(0);
     let totalDistance = 0;
     let totalDuration = 0;
 
@@ -58,13 +88,10 @@ export const useRoute = () => {
       const to   = waypoints[i + 1];
 
       if (to.direct) {
-        // Ligne droite — pas d'appel API
-        allSegments.push([
-          [from.lat, from.lng],
-          [to.lat,   to.lng],
-        ]);
-        totalDistance += haversineMeters(from.lat, from.lng, to.lat, to.lng);
-        // Pas de durée significative pour une ligne droite
+        const d = haversineMeters(from.lat, from.lng, to.lat, to.lng);
+        allSegments.push([[from.lat, from.lng], [to.lat, to.lng]]);
+        totalDistance   += d;
+        segDists[i + 1]  = d / 1000;
       } else {
         const result = await getRoute([from, to], profile);
         if (result) {
@@ -72,15 +99,15 @@ export const useRoute = () => {
             ([lng, lat]) => [lat, lng],
           );
           allSegments.push(seg);
-          totalDistance += result.distance;
-          totalDuration += result.duration;
+          totalDistance   += result.distance;
+          totalDuration   += result.duration;
+          segDists[i + 1]  = result.distance / 1000;
         }
       }
     }
 
     setIsCalculating(false);
 
-    // Concatène les segments en évitant les points en double
     const geometry: [number, number][] = [];
     allSegments.forEach((seg, i) => {
       if (i === 0) geometry.push(...seg);
@@ -93,6 +120,7 @@ export const useRoute = () => {
       totalDistance,
       duration: totalDuration,
     }));
+    setSegmentDistances(segDists);
   }, []);
 
   useEffect(() => {
@@ -110,40 +138,41 @@ export const useRoute = () => {
   // ── Waypoints ────────────────────────────────────────────
 
   const addWaypoint = useCallback((lat: number, lng: number) => {
+    const id = generateId();
     setRoute(prev => ({
       ...prev,
       waypoints: [
         ...prev.waypoints,
-        { id: generateId(), lat, lng, name: `Point ${prev.waypoints.length + 1}` },
+        { id, lat, lng, name: `Point ${prev.waypoints.length + 1}` },
       ],
     }));
+    enrichWithLocality(id, lat, lng, setRoute);
   }, []);
 
   const insertWaypoint = useCallback((lat: number, lng: number, atIndex: number) => {
+    const id = generateId();
     setRoute(prev => {
-      const wp: Waypoint = {
-        id: generateId(), lat, lng,
-        name: `Point ${prev.waypoints.length + 1}`,
-      };
+      const wp: Waypoint = { id, lat, lng, name: `Point ${prev.waypoints.length + 1}` };
       const wps = [...prev.waypoints];
       wps.splice(atIndex, 0, wp);
       return { ...prev, waypoints: wps };
     });
+    enrichWithLocality(id, lat, lng, setRoute);
   }, []);
 
-  // Point direct (segment ligne droite vers ce point)
   const insertDirectWaypoint = useCallback((lat: number, lng: number, atIndex: number) => {
+    const id = generateId();
     setRoute(prev => {
       const wp: Waypoint = {
-        id: generateId(), lat, lng,
+        id, lat, lng,
         name: `Point ${prev.waypoints.length + 1}`,
         direct: true,
       };
       const wps = [...prev.waypoints];
       wps.splice(atIndex, 0, wp);
-      // On efface la géométrie : elle sera recalculée au prochain triggerCalculate
       return { ...prev, waypoints: wps, routeGeometry: undefined };
     });
+    enrichWithLocality(id, lat, lng, setRoute);
   }, []);
 
   const removeWaypoint = useCallback((id: string) => {
@@ -151,6 +180,7 @@ export const useRoute = () => {
       ...prev,
       waypoints: prev.waypoints.filter(wp => wp.id !== id),
     }));
+    setSegmentDistances([]);
   }, []);
 
   const updateWaypointPosition = useCallback((id: string, lat: number, lng: number) => {
@@ -160,6 +190,8 @@ export const useRoute = () => {
         wp.id === id ? { ...wp, lat, lng } : wp,
       ),
     }));
+    setSegmentDistances([]);
+    enrichWithLocality(id, lat, lng, setRoute);
   }, []);
 
   const moveWaypoint = useCallback((fromIndex: number, toIndex: number) => {
@@ -169,6 +201,7 @@ export const useRoute = () => {
       wps.splice(toIndex, 0, moved);
       return { ...prev, waypoints: wps };
     });
+    setSegmentDistances([]);
   }, []);
 
   const renameRoute = useCallback((name: string) => {
@@ -177,6 +210,7 @@ export const useRoute = () => {
 
   const clearRoute = useCallback(() => {
     setRoute(prev => ({ ...prev, waypoints: [], routeGeometry: undefined }));
+    setSegmentDistances([]);
   }, []);
 
   const clearGeometry = useCallback(() => {
@@ -186,6 +220,7 @@ export const useRoute = () => {
       totalDistance: 0,
       duration: 0,
     }));
+    setSegmentDistances([]);
   }, []);
 
   const reverseRoute = useCallback(() => {
@@ -196,10 +231,41 @@ export const useRoute = () => {
       totalDistance: 0,
       duration: 0,
     }));
+    setSegmentDistances([]);
   }, []);
 
   const setProfile = useCallback((profile: RoutingProfile) => {
     setRoute(prev => ({ ...prev, profile }));
+  }, []);
+
+  // ── Import ───────────────────────────────────────────────
+
+  const importRoute = useCallback((
+    name: string,
+    rawWaypoints: { lat: number; lng: number; name?: string }[],
+    geometry?: [number, number][],
+  ) => {
+    const waypoints: Waypoint[] = rawWaypoints.map((wp, i) => ({
+      id:   generateId(),
+      lat:  wp.lat,
+      lng:  wp.lng,
+      name: wp.name ?? `Point ${i + 1}`,
+    }));
+
+    setRoute({
+      id:            generateId(),
+      name,
+      waypoints,
+      routeGeometry: geometry,
+      totalDistance: geometry ? computeGeometryLength(geometry) : 0,
+      duration:      0,
+      createdAt:     new Date(),
+      profile:       'driving-car',
+    });
+    setSegmentDistances([]);
+
+    // Enrichissement localité asynchrone
+    waypoints.forEach(wp => enrichWithLocality(wp.id, wp.lat, wp.lng, setRoute));
   }, []);
 
   return {
@@ -208,6 +274,7 @@ export const useRoute = () => {
     autoCalculate,
     setAutoCalculate,
     triggerCalculate,
+    segmentDistances,
     addWaypoint,
     insertWaypoint,
     insertDirectWaypoint,
@@ -219,5 +286,6 @@ export const useRoute = () => {
     clearGeometry,
     reverseRoute,
     setProfile,
+    importRoute,   // ← était manquant dans le return
   };
 };

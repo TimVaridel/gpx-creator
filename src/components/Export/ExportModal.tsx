@@ -24,60 +24,62 @@ function isValidHex(hex: string): boolean {
 }
 
 interface Props {
-  onClose: () => void;
-  onExport: (opts: ExportOptions) => void;
-  hasGeometry: boolean;
+  onClose:       () => void;
+  onExport:      (opts: ExportOptions) => void;
   waypointCount: number;
+  routeName:     string; // ← nouveau
 }
 
-export default function ExportModal({ onClose, onExport, hasGeometry, waypointCount }: Props) {
-  const [format, setFormat]           = useState<ExportOptions['format']>('gpx');
-  const [includeStart, setIncludeStart] = useState(true);
-  const [includeEnd,   setIncludeEnd]   = useState(true);
-  const [includeVia,   setIncludeVia]   = useState(true);
-  const [hexInput, setHexInput]       = useState('3b82f6');
-  const [rgb, setRgb]                 = useState<[number, number, number]>([59, 130, 246]);
-  const [hexError, setHexError]       = useState(false);
+export default function ExportModal({ onClose, onExport, waypointCount, routeName }: Props) {
+  const [format, setFormat]             = useState<ExportOptions['format']>('gpx');
+  const [includeStart, setIncludeStart] = useState(false);
+  const [includeEnd,   setIncludeEnd]   = useState(false);
+  const [includeVia,   setIncludeVia]   = useState(false);
+  const [hexInput, setHexInput]         = useState('3b82f6');
+  const [rgb, setRgb]                   = useState<[number, number, number]>([59, 130, 246]);
+  const [hexError, setHexError]         = useState(false);
 
-  const applyHex = useCallback((hex: string) => {
-    if (isValidHex(hex)) {
+  // Nom du fichier = routeName nettoyé
+  const safeFileName = routeName.trim().replace(/[/\\?%*:|"<>]/g, '-') || 'itinéraire';
+
+  const hasVia = waypointCount > 2;
+
+  const handlePreset = useCallback((hex: string) => {
+    setHexInput(hex);
+    setRgb(hexToRgb(hex));
+    setHexError(false);
+  }, []);
+
+  const handleHexInput = useCallback((val: string) => {
+    setHexInput(val);
+    if (isValidHex(val)) {
+      setRgb(hexToRgb(val));
       setHexError(false);
-      setRgb(hexToRgb(hex));
     } else {
       setHexError(true);
     }
   }, []);
 
-  const handleHexInput = (val: string) => {
-    setHexInput(val);
-    applyHex(val);
-  };
-
-  const handlePreset = (hex: string) => {
-    setHexInput(hex);
-    setRgb(hexToRgb(hex));
-    setHexError(false);
-  };
-
-  const handleRgbChange = (channel: 0 | 1 | 2, value: number) => {
-    const next: [number, number, number] = [...rgb] as [number, number, number];
-    next[channel] = Math.max(0, Math.min(255, value));
+  const handleRgbChange = useCallback((channel: 0 | 1 | 2, val: number) => {
+    const next = [...rgb] as [number, number, number];
+    next[channel] = val;
     setRgb(next);
-    const h = rgbToHex(...next);
-    setHexInput(h);
+    setHexInput(rgbToHex(...next));
     setHexError(false);
-  };
+  }, [rgb]);
 
-  const handleExport = () => {
-    if (!isValidHex(hexInput)) return;
-    onExport({ format, includeStart, includeEnd, includeVia, traceColor: hexInput });
+  const handleExport = useCallback(() => {
+    if (hexError || !isValidHex(hexInput)) return;
+    onExport({
+      format,
+      includeStart,
+      includeEnd,
+      includeVia,
+      traceColor: hexInput,
+    });
     onClose();
-  };
+  }, [format, includeStart, includeEnd, includeVia, hexInput, hexError, onExport, onClose]);
 
-  const previewColor = `#${isValidHex(hexInput) ? hexInput : '3b82f6'}`;
-  const hasVia = waypointCount > 2;
-
-  // ── Toggle pill ───────────────────────────────────────────
   const Toggle = ({
     value, onChange, disabled = false,
   }: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) => (
@@ -106,13 +108,21 @@ export default function ExportModal({ onClose, onExport, hasGeometry, waypointCo
         {/* Titre */}
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-lg font-bold text-gray-800">⚙️ Options d'export</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
-          >
+          <button onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-2xl leading-none">
             &times;
           </button>
         </div>
+
+        {/* ── Nom du fichier (aperçu) ─────────────────────── */}
+        <section className="mb-5">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+            Nom du fichier
+          </p>
+          <div className="bg-gray-50 rounded-xl px-4 py-2.5 text-sm text-gray-700 font-mono truncate">
+            {safeFileName}.{format}
+          </div>
+        </section>
 
         {/* ── Format ─────────────────────────────────────── */}
         <section className="mb-5">
@@ -121,14 +131,12 @@ export default function ExportModal({ onClose, onExport, hasGeometry, waypointCo
           </p>
           <div className="flex gap-2">
             {(['gpx', 'kml', 'csv'] as const).map(f => (
-              <button
-                key={f}
+              <button key={f}
                 onClick={() => setFormat(f)}
-                className={`flex-1 py-2 rounded-lg border text-sm font-bold transition-all
+                className={`flex-1 py-2 rounded-lg text-sm font-semibold border transition-colors
                   ${format === f
-                    ? 'bg-blue-500 text-white border-blue-500 shadow'
-                    : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`}
-              >
+                    ? 'bg-blue-500 text-white border-blue-500'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'}`}>
                 {f.toUpperCase()}
               </button>
             ))}
@@ -142,15 +150,17 @@ export default function ExportModal({ onClose, onExport, hasGeometry, waypointCo
           </p>
           <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-3">
             {([
-              { label: '🟢 Point de départ',    value: includeStart, setter: setIncludeStart, disabled: false },
-              { label: '🔵 Points de passage',  value: includeVia,   setter: setIncludeVia,   disabled: !hasVia },
-              { label: "🔴 Point d'arrivée",    value: includeEnd,   setter: setIncludeEnd,   disabled: false },
+              { label: '🟢 Point de départ',   value: includeStart, setter: setIncludeStart, disabled: false },
+              { label: '🔵 Points de passage', value: includeVia,   setter: setIncludeVia,   disabled: !hasVia },
+              { label: "🔴 Point d'arrivée",   value: includeEnd,   setter: setIncludeEnd,   disabled: false },
             ] as const).map(({ label, value, setter, disabled }) => (
               <label key={label} className="flex items-center gap-3">
                 <Toggle value={value} onChange={setter} disabled={disabled} />
                 <span className={`text-sm ${disabled ? 'text-gray-400' : 'text-gray-700'}`}>
                   {label}
-                  {disabled && <span className="ml-2 text-xs text-gray-400">(aucun point de passage)</span>}
+                  {disabled && (
+                    <span className="ml-2 text-xs text-gray-400">(aucun point de passage)</span>
+                  )}
                 </span>
               </label>
             ))}
@@ -163,97 +173,72 @@ export default function ExportModal({ onClose, onExport, hasGeometry, waypointCo
             Couleur de la trace
           </p>
 
-          {/* Présets */}
+          {/* Presets */}
           <div className="flex gap-2 mb-3 flex-wrap">
             {PRESET_COLORS.map(({ label, hex }) => (
               <button
                 key={hex}
                 title={label}
                 onClick={() => handlePreset(hex)}
-                className="w-8 h-8 rounded-full border-2 border-white shadow-md
-                           hover:scale-110 transition-transform"
-                style={{
-                  background: `#${hex}`,
-                  outline: hexInput === hex ? '2px solid #1d4ed8' : '2px solid transparent',
-                  outlineOffset: '2px',
-                }}
+                className={`w-7 h-7 rounded-full border-2 transition-transform hover:scale-110
+                  ${hexInput === hex ? 'border-gray-800 scale-110' : 'border-transparent'}`}
+                style={{ backgroundColor: `#${hex}` }}
               />
             ))}
           </div>
 
-          {/* Hex + aperçu */}
-          <div className="flex items-center gap-3 mb-3">
-            <span className="text-sm text-gray-500 font-mono">#</span>
-            <input
-              type="text"
-              maxLength={6}
-              value={hexInput}
-              onChange={e => handleHexInput(e.target.value.toLowerCase())}
-              className={`w-28 border rounded-lg px-2 py-1.5 text-sm font-mono uppercase
-                ${hexError
-                  ? 'border-red-400 bg-red-50 focus:ring-red-300'
-                  : 'border-gray-300 focus:ring-blue-300'}
-                focus:outline-none focus:ring-2`}
-              placeholder="3b82f6"
-            />
-            {/* Aperçu couleur */}
+          {/* Sliders RGB */}
+          <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2 mb-3">
+            {(['R', 'G', 'B'] as const).map((ch, i) => (
+              <div key={ch} className="flex items-center gap-3">
+                <span className="w-4 text-xs font-bold text-gray-500">{ch}</span>
+                <input
+                  type="range" min={0} max={255}
+                  value={rgb[i]}
+                  onChange={e => handleRgbChange(i as 0 | 1 | 2, Number(e.target.value))}
+                  className="flex-1 accent-blue-500"
+                />
+                <span className="w-8 text-xs text-right text-gray-600">{rgb[i]}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Saisie HEX + aperçu */}
+          <div className="flex items-center gap-3">
             <div
-              className="w-10 h-10 rounded-lg border border-gray-200 shadow-inner flex-shrink-0"
-              style={{ background: previewColor }}
+              className="w-9 h-9 rounded-lg border border-gray-200 flex-shrink-0"
+              style={{ backgroundColor: isValidHex(hexInput) ? `#${hexInput}` : '#ccc' }}
             />
+            <div className="flex items-center gap-1">
+              <span className="text-gray-400 font-mono">#</span>
+              <input
+                type="text"
+                maxLength={6}
+                value={hexInput}
+                onChange={e => handleHexInput(e.target.value)}
+                className={`w-24 px-2 py-1 rounded-lg border font-mono text-sm uppercase
+                  focus:outline-none focus:ring-2
+                  ${hexError
+                    ? 'border-red-400 focus:ring-red-300'
+                    : 'border-gray-200 focus:ring-blue-300'}`}
+              />
+            </div>
             {hexError && (
               <span className="text-xs text-red-500">Code invalide</span>
             )}
           </div>
-
-          {/* Sliders RGB */}
-          <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-2">
-            {(['R', 'G', 'B'] as const).map((ch, i) => (
-              <div key={ch} className="flex items-center gap-3">
-                <span className={`w-4 text-xs font-bold
-                  ${i === 0 ? 'text-red-500' : i === 1 ? 'text-green-600' : 'text-blue-500'}`}>
-                  {ch}
-                </span>
-                <input
-                  type="range" min={0} max={255}
-                  value={rgb[i]}
-                  onChange={e => handleRgbChange(i as 0|1|2, Number(e.target.value))}
-                  className="flex-1 accent-blue-500 h-2"
-                />
-                <input
-                  type="number" min={0} max={255}
-                  value={rgb[i]}
-                  onChange={e => handleRgbChange(i as 0|1|2, Number(e.target.value))}
-                  className="w-14 border border-gray-300 rounded-lg px-2 py-0.5
-                             text-sm text-center focus:outline-none focus:ring-1
-                             focus:ring-blue-300"
-                />
-              </div>
-            ))}
-          </div>
         </section>
 
-        {/* ── Boutons ────────────────────────────────────── */}
-        <div className="flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 py-2.5 rounded-lg border border-gray-300 text-sm
-                       text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            Annuler
-          </button>
-          <button
-            onClick={handleExport}
-            disabled={waypointCount < 2 || hexError}
-            className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all
-              ${waypointCount >= 2 && !hexError
-                ? 'bg-blue-500 hover:bg-blue-600 text-white shadow'
-                : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
-          >
-            ⬇️ Exporter en {format.toUpperCase()}
-            {hasGeometry ? ' (trace)' : ' (points)'}
-          </button>
-        </div>
+        {/* ── Bouton export ──────────────────────────────── */}
+        <button
+          onClick={handleExport}
+          disabled={waypointCount < 2}
+          className="w-full py-3 rounded-xl font-semibold text-white text-sm
+                     bg-blue-500 hover:bg-blue-600 transition-colors shadow-md
+                     disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Exporter en {format.toUpperCase()}
+        </button>
       </div>
     </>
   );

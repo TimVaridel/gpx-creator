@@ -117,7 +117,7 @@ function generateCSV(
   const lines = ['lat,lng,type,name'];
   const filtered = filterWaypoints(waypoints, opts);
 
-  filtered.forEach((wp, i) => {
+  filtered.forEach((wp) => {
     const isStart = waypoints.indexOf(wp) === 0;
     const isEnd   = waypoints.indexOf(wp) === waypoints.length - 1;
     const type = isStart ? 'start' : isEnd ? 'end' : 'via';

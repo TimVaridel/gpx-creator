@@ -21,4 +21,14 @@ export interface Route {
   duration?: number;
 }
 
+export interface Waypoint {
+  id: string;
+  lat: number;
+  lng: number;
+  name?: string;
+  elevation?: number;
+  direct?: boolean;
+  locality?: string; // "1131 Tolochenaz" — via géocodage inverse
+}
+
 export type DrawingMode = 'idle' | 'drawing' | 'editing';

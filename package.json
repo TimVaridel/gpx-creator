@@ -19,7 +19,8 @@
     "leaflet-draw": "^1.0.4",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "react-leaflet": "^5.0.0"
+    "react-leaflet": "^5.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.36.3",
