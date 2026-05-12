@@ -1,7 +1,7 @@
 import type { Waypoint } from '../types/route.types';
 
 const ORS_API_KEY = import.meta.env.VITE_ORS_API_KEY;
-const ORS_URL = 'https://api.openrouteservice.org/v2/directions';
+const ORS_URL = 'https://ors-proxy.varidel-timothee.workers.dev/';
 
 export type RoutingProfile = 'driving-car' | 'cycling-regular' | 'foot-walking';
 
