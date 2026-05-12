@@ -7,7 +7,6 @@ import PlanningModal from './components/Planning/PlanningModal';
 import ImportButton from './components/Sidebar/ImportButton';
 import { useRoute } from './hooks/useRoute';
 import { generateExport } from './utils/exportGenerator';
-import type { ExportOptions } from './utils/exportGenerator';
 import type { ParsedRoute } from './services/importParser';
 
 export type MapLayer = 'osm' | 'google-road' | 'google-hybrid' | 'google-terrain';
