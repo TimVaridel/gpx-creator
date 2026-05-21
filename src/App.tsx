@@ -136,12 +136,12 @@ function App() {
         {/* Stats compactes */}
         <div className="px-3 py-2 border-b border-gray-200 bg-gray-50 space-y-1.5">
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1 bg-green-50 rounded px-2 py-1">
-              <span className="text-sm font-bold text-green-600">{distanceKm}</span>
+            <div className="flex items-center gap-1 bg-green-50 rounded px-1 py-1">
+              <span className="text-xs font-bold text-green-600">{distanceKm}</span>
               <span className="text-[10px] text-gray-500">km</span>
             </div>
             {duration && (
-              <div className="flex items-center gap-1 bg-purple-50 rounded px-2 py-1">
+              <div className="flex items-center gap-1 bg-purple-50 rounded px-1 py-1">
                 <span className="text-xs font-semibold text-purple-600">{duration}</span>
               </div>
             )}
@@ -150,7 +150,7 @@ function App() {
                 ⏳ Calcul…
               </span>
             )}
-            <div className="flex items-center gap-1 bg-orange-50 rounded px-2 py-1">
+            <div className="flex items-center gap-1 bg-orange-50 rounded px-1 py-1">
               <span className="text-xs font-semibold text-orange-600">
                 {formatDurationFromSpeed(parseFloat(distanceKm), maxSpeed) ?? '—'}
               </span>
@@ -158,11 +158,11 @@ function App() {
             <div className="flex items-center gap-1">
               <input
                 type="number"
-                min={1}
+                min={0}
                 max={300}
                 value={maxSpeed === 0 ? '' : maxSpeed}
-                onChange={e => setMaxSpeed(Math.max(1, Number(e.target.value)))}
-                className="w-14 border border-gray-300 rounded px-1 py-0.5 text-xs text-center
+                onChange={e => setMaxSpeed(Math.max(0, Number(e.target.value)))}
+                className="w-11 border border-gray-300 rounded px-1 py-0.5 text-xs text-center
                            focus:outline-none focus:border-orange-400"
               />
               <span className="text-[10px] text-gray-500">km/h</span>
@@ -171,10 +171,10 @@ function App() {
         </div>
 
         {/* Contrôles calcul */}
-        <div className="flex items-center gap-1.5 px-3 py-2 border-b border-gray-200">
+        <div className="flex items-center gap-1.5 px-1 py-1 border-b border-gray-200">
           <button
             onClick={() => setAutoCalculate(v => !v)}
-            className={`flex-1 py-1.5 rounded text-xs font-medium transition-colors ${
+            className={`flex-1 py-1 rounded text-xs font-medium transition-colors ${
               autoCalculate
                 ? 'bg-blue-500 text-white hover:bg-blue-600'
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -186,7 +186,7 @@ function App() {
             <button
               onClick={triggerCalculate}
               disabled={isCalculating}
-              className="flex-1 py-1.5 rounded text-xs font-medium
+              className="flex-1 py-1 rounded text-xs font-medium
                          bg-green-500 text-white hover:bg-green-600
                          disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
@@ -196,9 +196,9 @@ function App() {
         </div>
 
         {/* Sélecteur fond de carte */}
-        <div className="px-3 py-2 border-b border-gray-200 bg-gray-50 space-y-1.5">
+        <div className="px-2 py-1 border-b border-gray-200 bg-gray-50 space-y-0.5">
           <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Fond de carte</p>
-          <div className="grid grid-cols-2 gap-1">
+          <div className="grid grid-cols-2 gap-0.5">
             {(
               [
                 { id: 'osm',            label: '🗺 OpenStreetMap' },
@@ -222,7 +222,7 @@ function App() {
           </div>
           <button
             onClick={() => setShowTraffic(v => !v)}
-            className={`w-full py-1 px-2 rounded text-[10px] font-medium transition-colors flex items-center gap-1.5 ${
+            className={`w-full py-1 px-1 rounded text-[10px] font-medium transition-colors flex items-center gap-1.5 ${
               showTraffic
                 ? 'bg-orange-500 text-white'
                 : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
@@ -234,7 +234,7 @@ function App() {
         </div>
 
         {/* Liste des waypoints */}
-        <div className="flex-1 overflow-y-auto px-2 py-2">
+        <div className="flex-1 overflow-y-auto px-1 py-0.5">
           <WaypointList
             waypoints={route.waypoints}
             onRemove={removeWaypoint}
@@ -250,7 +250,7 @@ function App() {
         </div>
 
         {/* Bouton Ajouter un point de passage */}
-        <div className="px-2 pb-1 border-t border-gray-100 pt-2">
+        <div className="px-1 pb-1 border-t border-gray-100 pt-1">
           {showAddVia ? (
             <PlaceSearch
               placeholder="Rechercher un point de passage…"
