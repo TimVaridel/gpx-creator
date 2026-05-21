@@ -57,6 +57,7 @@ export const useRoute = () => {
   const [isCalculating,    setIsCalculating]    = useState(false);
   const [autoCalculate,    setAutoCalculate]    = useState(false);
   const [segmentDistances, setSegmentDistances] = useState<number[]>([]);
+  const [segmentDurations, setSegmentDurations] = useState<number[]>([]);
 
   const waypointsRef = useRef(route.waypoints);
   const profileRef   = useRef(route.profile);
@@ -73,6 +74,7 @@ export const useRoute = () => {
         duration: 0,
       }));
       setSegmentDistances([]);
+      setSegmentDurations([]);
       return;
     }
 
@@ -80,6 +82,7 @@ export const useRoute = () => {
 
     const allSegments: [number, number][][] = [];
     const segDists: number[] = new Array(waypoints.length).fill(0);
+    const segDurs:  number[] = new Array(waypoints.length).fill(0);
     let totalDistance = 0;
     let totalDuration = 0;
 
@@ -92,6 +95,7 @@ export const useRoute = () => {
         allSegments.push([[from.lat, from.lng], [to.lat, to.lng]]);
         totalDistance   += d;
         segDists[i + 1]  = d / 1000;
+        // pas de durée OSRM pour un segment direct
       } else {
         const result = await getRoute([from, to], profile);
         if (result) {
@@ -102,6 +106,7 @@ export const useRoute = () => {
           totalDistance   += result.distance;
           totalDuration   += result.duration;
           segDists[i + 1]  = result.distance / 1000;
+          segDurs[i + 1]   = result.duration;
         }
       }
     }
@@ -121,6 +126,7 @@ export const useRoute = () => {
       duration: totalDuration,
     }));
     setSegmentDistances(segDists);
+    setSegmentDurations(segDurs);
   }, []);
 
   useEffect(() => {
@@ -181,6 +187,7 @@ export const useRoute = () => {
       waypoints: prev.waypoints.filter(wp => wp.id !== id),
     }));
     setSegmentDistances([]);
+    setSegmentDurations([]);
   }, []);
 
   const updateWaypointPosition = useCallback((id: string, lat: number, lng: number) => {
@@ -191,6 +198,7 @@ export const useRoute = () => {
       ),
     }));
     setSegmentDistances([]);
+    setSegmentDurations([]);
     enrichWithLocality(id, lat, lng, setRoute);
   }, []);
 
@@ -202,6 +210,7 @@ export const useRoute = () => {
       return { ...prev, waypoints: wps };
     });
     setSegmentDistances([]);
+    setSegmentDurations([]);
   }, []);
 
   const renameRoute = useCallback((name: string) => {
@@ -211,6 +220,7 @@ export const useRoute = () => {
   const clearRoute = useCallback(() => {
     setRoute(prev => ({ ...prev, waypoints: [], routeGeometry: undefined }));
     setSegmentDistances([]);
+    setSegmentDurations([]);
   }, []);
 
   const clearGeometry = useCallback(() => {
@@ -221,6 +231,7 @@ export const useRoute = () => {
       duration: 0,
     }));
     setSegmentDistances([]);
+    setSegmentDurations([]);
   }, []);
 
   const reverseRoute = useCallback(() => {
@@ -232,6 +243,7 @@ export const useRoute = () => {
       duration: 0,
     }));
     setSegmentDistances([]);
+    setSegmentDurations([]);
   }, []);
 
   const setProfile = useCallback((profile: RoutingProfile) => {
@@ -263,8 +275,8 @@ export const useRoute = () => {
       profile:       'driving-car',
     });
     setSegmentDistances([]);
+    setSegmentDurations([]);
 
-    // Enrichissement localité asynchrone
     waypoints.forEach(wp => enrichWithLocality(wp.id, wp.lat, wp.lng, setRoute));
   }, []);
 
@@ -275,6 +287,7 @@ export const useRoute = () => {
     setAutoCalculate,
     triggerCalculate,
     segmentDistances,
+    segmentDurations,
     addWaypoint,
     insertWaypoint,
     insertDirectWaypoint,
@@ -286,6 +299,6 @@ export const useRoute = () => {
     clearGeometry,
     reverseRoute,
     setProfile,
-    importRoute,   // ← était manquant dans le return
+    importRoute,
   };
 };

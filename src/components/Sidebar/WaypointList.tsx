@@ -17,6 +17,19 @@ import type { Waypoint } from '../../types/route.types';
 import PlaceSearch from './PlaceSearch';
 import type { PlaceResult } from '../../services/geocoding';
 
+const DEFAULT_SPEED = 60;
+
+function formatDur(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return h > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${m} min`;
+}
+
+function durFromSpeed(distKm: number, speedKmh: number): string | null {
+  if (!distKm || distKm <= 0 || speedKmh <= 0) return null;
+  return formatDur((distKm / speedKmh) * 3600);
+}
+
 // ── Entrée fantôme (départ ou arrivée non encore défini) ─────
 interface GhostRowProps {
   label: string;
@@ -30,9 +43,7 @@ const GhostRow = ({ label, color, onSearchSelect }: GhostRowProps) => {
   return (
     <li className="flex items-center gap-1.5 bg-gray-50 border border-dashed border-gray-300
                    rounded-lg px-2 py-1.5">
-      {/* Espace poignée */}
       <span className="w-5 flex-shrink-0" />
-      {/* Point coloré */}
       <span className={`w-5 h-5 rounded-full flex-shrink-0 border-2 border-white shadow-sm ${color}`} />
 
       {searching ? (
@@ -71,18 +82,18 @@ interface SortableItemProps {
   onRemove: (id: string) => void;
   onUpdatePosition: (id: string, lat: number, lng: number) => void;
   distFromPrev?: number;
+  durFromPrev?: number;    // secondes OSRM
+  segSpeed?: number;       // km/h vitesse perso pour ce segment
+  onSpeedChange?: (speed: number) => void;
 }
 
 const SortableItem = ({
-  waypoint, index, total, onRemove, onUpdatePosition, distFromPrev,
+  waypoint, index, total, onRemove, onUpdatePosition,
+  distFromPrev, durFromPrev, segSpeed, onSpeedChange,
 }: SortableItemProps) => {
   const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
+    attributes, listeners, setNodeRef,
+    transform, transition, isDragging,
   } = useSortable({ id: waypoint.id });
 
   const [searching, setSearching] = useState(false);
@@ -95,40 +106,76 @@ const SortableItem = ({
   };
 
   const dotColor =
-    index === 0
-      ? 'bg-green-500'
-      : index === total - 1
-        ? 'bg-red-500'
-        : waypoint.direct
-          ? 'bg-purple-400'
-          : 'bg-blue-400';
+    index === 0       ? 'bg-green-500' :
+    index === total-1 ? 'bg-red-500'   :
+    waypoint.direct   ? 'bg-purple-400': 'bg-blue-400';
+
+  const speed        = segSpeed ?? DEFAULT_SPEED;
+  const hasSegData   = distFromPrev !== undefined && distFromPrev > 0;
+  const osrmTime     = hasSegData && durFromPrev ? formatDur(durFromPrev)               : null;
+  const customTime   = hasSegData                ? durFromSpeed(distFromPrev!, speed)   : null;
 
   return (
     <>
-      {/* Connecteur avec distance routing entre points */}
+      {/* ── Connecteur entre points ── */}
       {index > 0 && (
-        <li className="flex items-center gap-1 px-2 select-none h-5">
+        <li className="flex items-start gap-1 px-2 select-none py-1">
           <span className="w-5 flex-shrink-0" />
-          <div className="flex items-center gap-1 flex-1">
-            <div className="w-px h-full bg-gray-200 ml-2" />
-            {distFromPrev !== undefined && distFromPrev > 0 ? (
-              <span className="text-[10px] text-blue-400 font-medium ml-1">
-                {distFromPrev.toFixed(1)} km
-              </span>
-            ) : (
-              <span className="text-[10px] text-gray-300 italic ml-1">— km</span>
-            )}
+          <div className="flex flex-col gap-0.5 flex-1 pl-2 border-l border-gray-200">
+
+            {/* Distance */}
+            <div className="flex items-center gap-1">
+              {hasSegData ? (
+                <span className="text-[10px] text-blue-400 font-medium">
+                  {distFromPrev!.toFixed(1)} km
+                </span>
+              ) : (
+                <span className="text-[10px] text-gray-300 italic">— km</span>
+              )}
+              {/* Temps OSRM */}
+              {osrmTime ? (
+                <>
+                  <span className="text-[10px] font-semibold text-purple-500 bg-purple-50
+                                   border border-purple-200 rounded px-1">
+                    {osrmTime}
+                  </span>
+                </>
+              ) : (
+                <span className="text-[10px] text-gray-300 italic">— (OSRM)</span>
+              )}
+              {/* Temps vitesse perso + champ vitesse */}
+              {customTime ? (
+                <span className="text-[10px] font-semibold text-orange-500 bg-orange-50
+                                 border border-orange-200 rounded px-1">
+                  {customTime}
+                </span>
+              ) : (
+                <span className="text-[10px] text-gray-300 italic">—</span>
+              )}
+              <input
+                type="number"
+                min={1}
+                max={300}
+                value={speed}
+                onChange={e => onSpeedChange?.(Math.max(1, Number(e.target.value)))}
+                className="w-10 border border-gray-300 rounded px-1 py-0 text-[10px]
+                           text-center focus:outline-none focus:border-orange-400 bg-white"
+                title="Vitesse max pour ce segment (km/h)"
+              />
+              <span className="text-[9px] text-gray-400">km/h</span>
+            </div>
+
           </div>
         </li>
       )}
 
+      {/* ── Carte waypoint ── */}
       <li
         ref={setNodeRef}
         style={style}
         className="bg-gray-50 border border-gray-200 rounded-lg
                    hover:bg-gray-100 transition-colors select-none"
       >
-        {/* Ligne principale */}
         <div className="flex items-center gap-1.5 px-2 py-1.5">
           {/* Poignée drag */}
           <button
@@ -169,7 +216,7 @@ const SortableItem = ({
             </span>
           )}
 
-          {/* Loupe recherche */}
+          {/* Loupe */}
           <button
             onClick={() => setSearching(s => !s)}
             className={`transition-colors flex-shrink-0 ${
@@ -195,7 +242,7 @@ const SortableItem = ({
           </button>
         </div>
 
-        {/* Zone recherche inline */}
+        {/* Recherche inline */}
         {searching && (
           <div className="px-2 pb-2">
             <PlaceSearch
@@ -222,6 +269,9 @@ interface WaypointListProps {
   onSetStart: (lat: number, lng: number) => void;
   onSetEnd: (lat: number, lng: number) => void;
   segmentDistances?: number[];
+  segmentDurations?: number[];
+  segmentSpeeds?: number[];
+  onSegmentSpeedChange?: (index: number, speed: number) => void;
 }
 
 const WaypointList = ({
@@ -232,6 +282,9 @@ const WaypointList = ({
   onSetStart,
   onSetEnd,
   segmentDistances,
+  segmentDurations,
+  segmentSpeeds,
+  onSegmentSpeedChange,
 }: WaypointListProps) => {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -245,11 +298,8 @@ const WaypointList = ({
     if (fromIndex !== -1 && toIndex !== -1) onReorder(fromIndex, toIndex);
   };
 
-  // Waypoints intermédiaires (sans départ ni arrivée)
-  const hasStart  = waypoints.length > 0;
-  const hasEnd    = waypoints.length > 1;
-
-  // Items triables = tous les waypoints existants
+  const hasStart = waypoints.length > 0;
+  const hasEnd   = waypoints.length > 1;
   const sortableItems = waypoints.map(wp => wp.id);
 
   return (
@@ -257,7 +307,7 @@ const WaypointList = ({
       <SortableContext items={sortableItems} strategy={verticalListSortingStrategy}>
         <ul className="space-y-0">
 
-          {/* ── Point de départ ── */}
+          {/* ── Départ ── */}
           {!hasStart ? (
             <GhostRow
               label="Point de départ"
@@ -272,7 +322,6 @@ const WaypointList = ({
               total={waypoints.length}
               onRemove={onRemove}
               onUpdatePosition={onUpdatePosition}
-              distFromPrev={segmentDistances?.[0]}
             />
           )}
 
@@ -286,10 +335,13 @@ const WaypointList = ({
               onRemove={onRemove}
               onUpdatePosition={onUpdatePosition}
               distFromPrev={segmentDistances?.[i + 1]}
+              durFromPrev={segmentDurations?.[i + 1]}
+              segSpeed={segmentSpeeds?.[i + 1]}
+              onSpeedChange={s => onSegmentSpeedChange?.(i + 1, s)}
             />
           ))}
 
-          {/* ── Point d'arrivée ── */}
+          {/* ── Arrivée ── */}
           {!hasEnd ? (
             <GhostRow
               label="Point d'arrivée"
@@ -305,6 +357,9 @@ const WaypointList = ({
               onRemove={onRemove}
               onUpdatePosition={onUpdatePosition}
               distFromPrev={segmentDistances?.[waypoints.length - 1]}
+              durFromPrev={segmentDurations?.[waypoints.length - 1]}
+              segSpeed={segmentSpeeds?.[waypoints.length - 1]}
+              onSpeedChange={s => onSegmentSpeedChange?.(waypoints.length - 1, s)}
             />
           ) : null}
 

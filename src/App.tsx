@@ -19,6 +19,7 @@ function App() {
     setAutoCalculate,
     triggerCalculate,
     segmentDistances,
+    segmentDurations,
     insertWaypoint,
     insertDirectWaypoint,
     removeWaypoint,
@@ -37,7 +38,9 @@ function App() {
   const [showAddVia,        setShowAddVia]         = useState(false);
   const [mapLayer,          setMapLayer]           = useState<MapLayer>('osm');
   const [showTraffic,       setShowTraffic]        = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen,       setSidebarOpen]        = useState(true);
+  const [maxSpeed,          setMaxSpeed]           = useState<number>(60);
+  const [segmentSpeeds,     setSegmentSpeeds]      = useState<number[]>([]);
 
   // ── Stats ────────────────────────────────────────────────
   const distanceKm = route.totalDistance
@@ -48,6 +51,14 @@ function App() {
     if (!seconds) return null;
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
+    return h > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${m} min`;
+  };
+
+  const formatDurationFromSpeed = (distKm: number, speedKmh: number) => {
+    if (!distKm || distKm <= 0 || speedKmh <= 0) return null;
+    const totalSeconds = (distKm / speedKmh) * 3600;
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
     return h > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${m} min`;
   };
 
@@ -76,6 +87,15 @@ function App() {
     importRoute(parsed.name, parsed.waypoints, parsed.geometry);
   };
 
+  // ── Vitesses par segment ─────────────────────────────────
+  const handleSegmentSpeedChange = (index: number, speed: number) => {
+    setSegmentSpeeds(prev => {
+      const next = [...prev];
+      next[index] = speed;
+      return next;
+    });
+  };
+
   const hasGeometry = !!route.routeGeometry?.length;
   const duration    = formatDuration(route.duration);
 
@@ -84,14 +104,6 @@ function App() {
 
       {/* ── Sidebar gauche ── */}
       <aside className={`relative bg-white shadow-lg flex flex-col z-10 transition-all duration-300 ${sidebarOpen ? 'w-72' : 'w-0 overflow-hidden'}`}>
-
-        {/* Header compact */}
-        <div className="bg-blue-600 text-white px-3 py-2.5 flex items-center justify-between">
-          <div>
-            <h1 className="text-base font-bold leading-tight">🗺️ GPX Creator</h1>
-            <p className="text-blue-200 text-[10px]">Clic droit sur la carte pour ajouter</p>
-          </div>
-        </div>
 
         {/* Nom de l'itinéraire */}
         <div className="px-3 py-2 border-b border-gray-200">
@@ -122,25 +134,40 @@ function App() {
         </div>
 
         {/* Stats compactes */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 bg-gray-50">
-          <div className="flex items-center gap-1 bg-blue-50 rounded px-2 py-1">
-            <span className="text-sm font-bold text-blue-600">{route.waypoints.length}</span>
-            <span className="text-[10px] text-gray-500">pts</span>
-          </div>
-          <div className="flex items-center gap-1 bg-green-50 rounded px-2 py-1">
-            <span className="text-sm font-bold text-green-600">{distanceKm}</span>
-            <span className="text-[10px] text-gray-500">km</span>
-          </div>
-          {duration && (
-            <div className="flex items-center gap-1 bg-purple-50 rounded px-2 py-1">
-              <span className="text-xs font-semibold text-purple-600">🕐 {duration}</span>
+        <div className="px-3 py-2 border-b border-gray-200 bg-gray-50 space-y-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1 bg-green-50 rounded px-2 py-1">
+              <span className="text-sm font-bold text-green-600">{distanceKm}</span>
+              <span className="text-[10px] text-gray-500">km</span>
             </div>
-          )}
-          {isCalculating && (
-            <span className="text-[10px] text-yellow-600 bg-yellow-50 rounded px-2 py-1 animate-pulse">
-              ⏳ Calcul…
-            </span>
-          )}
+            {duration && (
+              <div className="flex items-center gap-1 bg-purple-50 rounded px-2 py-1">
+                <span className="text-xs font-semibold text-purple-600">{duration}</span>
+              </div>
+            )}
+            {isCalculating && (
+              <span className="text-[10px] text-yellow-600 bg-yellow-50 rounded px-2 py-1 animate-pulse">
+                ⏳ Calcul…
+              </span>
+            )}
+            <div className="flex items-center gap-1 bg-orange-50 rounded px-2 py-1">
+              <span className="text-xs font-semibold text-orange-600">
+                {formatDurationFromSpeed(parseFloat(distanceKm), maxSpeed) ?? '—'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={1}
+                max={300}
+                value={maxSpeed === 0 ? '' : maxSpeed}
+                onChange={e => setMaxSpeed(Math.max(1, Number(e.target.value)))}
+                className="w-14 border border-gray-300 rounded px-1 py-0.5 text-xs text-center
+                           focus:outline-none focus:border-orange-400"
+              />
+              <span className="text-[10px] text-gray-500">km/h</span>
+            </div>
+          </div>
         </div>
 
         {/* Contrôles calcul */}
@@ -193,7 +220,6 @@ function App() {
               </button>
             ))}
           </div>
-          {/* Toggle trafic */}
           <button
             onClick={() => setShowTraffic(v => !v)}
             className={`w-full py-1 px-2 rounded text-[10px] font-medium transition-colors flex items-center gap-1.5 ${
@@ -217,6 +243,9 @@ function App() {
             onSetStart={(lat, lng) => insertWaypoint(lat, lng, 0)}
             onSetEnd={(lat, lng) => insertWaypoint(lat, lng, route.waypoints.length)}
             segmentDistances={segmentDistances}
+            segmentDurations={segmentDurations}
+            segmentSpeeds={segmentSpeeds}
+            onSegmentSpeedChange={handleSegmentSpeedChange}
           />
         </div>
 
@@ -251,10 +280,8 @@ function App() {
         {/* Actions */}
         <div className="p-2 border-t border-gray-200 space-y-1.5">
 
-          {/* Import — pleine largeur */}
           <ImportButton onImport={handleImport} />
 
-          {/* Ligne 1 : Planning + Export */}
           <div className="grid grid-cols-2 gap-1.5">
             <button
               onClick={() => setShowPlanningModal(true)}
@@ -280,7 +307,6 @@ function App() {
             </button>
           </div>
 
-          {/* Ligne 2 : Inverser + Supprimer trace */}
           <div className="grid grid-cols-2 gap-1.5">
             <button
               onClick={reverseRoute}
@@ -302,7 +328,6 @@ function App() {
             </button>
           </div>
 
-          {/* Ligne 3 : Effacer tout */}
           <button
             onClick={() => { if (confirm("Effacer tout l'itinéraire ?")) clearRoute(); }}
             disabled={route.waypoints.length === 0}
@@ -315,19 +340,18 @@ function App() {
         </div>
       </aside>
 
-      {/* Bouton toggle sidebar — toujours visible */}
+      {/* Bouton toggle sidebar */}
       <button
         onClick={() => setSidebarOpen(o => !o)}
         className={`fixed top-20 z-[1000] w-7 h-7 bg-white border border-gray-300
                     rounded shadow-md flex items-center justify-center
-                    text-gray-600 hover:text-blue-500 hover:bg-blue-50 
+                    text-gray-600 hover:text-blue-500 hover:bg-blue-50
                     transition-all duration-300
                     ${sidebarOpen ? 'left-[288px]' : 'left-2'}`}
         title={sidebarOpen ? 'Réduire le panneau' : 'Ouvrir le panneau'}
       >
         {sidebarOpen ? '◀' : '▶'}
       </button>
-
 
       {/* ── Carte ── */}
       <main className="flex-1 relative">
@@ -362,10 +386,9 @@ function App() {
           onClose={() => setShowExportModal(false)}
           onExport={(opts) => generateExport(route.waypoints, route.routeGeometry, route.name, opts)}
           waypointCount={route.waypoints.length}
-          routeName={route.name}   // ← ajouter
+          routeName={route.name}
         />
       )}
-
 
       {/* ── Modal planning ── */}
       {showPlanningModal && (
