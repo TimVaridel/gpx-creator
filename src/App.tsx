@@ -41,6 +41,7 @@ function App() {
   const [sidebarOpen,       setSidebarOpen]        = useState(true);
   const [maxSpeed,          setMaxSpeed]           = useState<number>(60);
   const [segmentSpeeds,     setSegmentSpeeds]      = useState<number[]>([]);
+  const [showMapMenu,       setShowMapMenu]        = useState(false);
 
   // ── Stats ────────────────────────────────────────────────
   const distanceKm = route.totalDistance
@@ -195,44 +196,6 @@ function App() {
           )}
         </div>
 
-        {/* Sélecteur fond de carte */}
-        <div className="px-2 py-1 border-b border-gray-200 bg-gray-50 space-y-0.5">
-          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Fond de carte</p>
-          <div className="grid grid-cols-2 gap-0.5">
-            {(
-              [
-                { id: 'osm',            label: '🗺 OpenStreetMap' },
-                { id: 'google-road',    label: '🛣 Google Route' },
-                { id: 'google-hybrid',  label: '🛰 Google Hybrid' },
-                { id: 'google-terrain', label: '⛰ Google Terrain' },
-              ] as { id: MapLayer; label: string }[]
-            ).map(opt => (
-              <button
-                key={opt.id}
-                onClick={() => setMapLayer(opt.id)}
-                className={`py-1 px-1.5 rounded text-[10px] font-medium text-left transition-colors ${
-                  mapLayer === opt.id
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => setShowTraffic(v => !v)}
-            className={`w-full py-1 px-1 rounded text-[10px] font-medium transition-colors flex items-center gap-1.5 ${
-              showTraffic
-                ? 'bg-orange-500 text-white'
-                : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <span>🚦</span>
-            <span>Trafic Google {showTraffic ? 'ON' : 'OFF'}</span>
-          </button>
-        </div>
-
         {/* Liste des waypoints */}
         <div className="flex-1 overflow-y-auto px-1 py-0.5">
           <WaypointList
@@ -352,6 +315,69 @@ function App() {
       >
         {sidebarOpen ? '◀' : '▶'}
       </button>
+
+      {/* Bouton fond de carte flottant */}
+      <div className={`fixed top-28 z-[1000] transition-all duration-300
+                       ${sidebarOpen ? 'left-[288px]' : 'left-2'}`}>
+        <button
+          onClick={() => setShowMapMenu(v => !v)}
+          className={`w-7 h-7 border rounded shadow-md flex items-center justify-center
+                      text-sm transition-colors
+                      ${showMapMenu
+                        ? 'bg-blue-500 border-blue-500 text-white'
+                        : 'bg-white border-gray-300 text-gray-600 hover:text-blue-500 hover:bg-blue-50'
+                      }`}
+          title="Fond de carte"
+        >
+          🗺
+        </button>
+
+        {/* Dropdown fond de carte */}
+        {showMapMenu && (
+          <div
+            className="absolute top-8 left-0 bg-white border border-gray-200 rounded-lg
+                        shadow-xl p-2 space-y-1 w-44"
+            onMouseLeave={() => setShowMapMenu(false)}
+          >
+            <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wide px-1 pb-0.5">
+              Fond de carte
+            </p>
+            {(
+              [
+                { id: 'osm',            label: '🗺 OpenStreetMap' },
+                { id: 'google-road',    label: '🛣 Google Route' },
+                { id: 'google-hybrid',  label: '🛰 Google Hybrid' },
+                { id: 'google-terrain', label: '⛰ Google Terrain' },
+              ] as { id: MapLayer; label: string }[]
+            ).map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => { setMapLayer(opt.id); setShowMapMenu(false); }}
+                className={`w-full text-left py-1 px-2 rounded text-[11px] font-medium transition-colors ${
+                  mapLayer === opt.id
+                    ? 'bg-blue-500 text-white'
+                    : 'text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+            <div className="border-t border-gray-100 pt-1">
+              <button
+                onClick={() => setShowTraffic(v => !v)}
+                className={`w-full text-left py-1 px-2 rounded text-[11px] font-medium transition-colors flex items-center gap-1.5 ${
+                  showTraffic
+                    ? 'bg-orange-500 text-white'
+                    : 'text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                <span>🚦</span>
+                <span>Trafic {showTraffic ? 'ON' : 'OFF'}</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* ── Carte ── */}
       <main className="flex-1 relative">
