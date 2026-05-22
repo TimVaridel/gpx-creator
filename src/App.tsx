@@ -9,7 +9,7 @@ import { useRoute } from './hooks/useRoute';
 import { generateExport } from './utils/exportGenerator';
 import type { ParsedRoute } from './services/importParser';
 
-export type MapLayer = 'osm' | 'google-road' | 'google-hybrid' | 'google-terrain';
+export type MapLayer = 'osm' | 'google-road' | 'google-hybrid' | 'google-terrain' | 'swisstopo' | 'swisstopo-gray' | 'swisstopo-imagery';
 
 function App() {
   const {
@@ -42,6 +42,7 @@ function App() {
   const [maxSpeed,          setMaxSpeed]           = useState<number>(60);
   const [segmentSpeeds,     setSegmentSpeeds]      = useState<number[]>([]);
   const [showMapMenu,       setShowMapMenu]        = useState(false);
+  const [showExceptionalRoutes, setShowExceptionalRoutes] = useState(false);
 
   // ── Stats ────────────────────────────────────────────────
   const distanceKm = route.totalDistance
@@ -348,6 +349,9 @@ function App() {
                 { id: 'google-road',    label: '🛣 Google Route' },
                 { id: 'google-hybrid',  label: '🛰 Google Hybrid' },
                 { id: 'google-terrain', label: '⛰ Google Terrain' },
+                { id: 'swisstopo',      label: '🏞 Swisstopo' },
+                { id: 'swisstopo-gray', label: '⬜ Swisstopo Gray' },
+                { id: 'swisstopo-imagery', label: '📷 Swisstopo Imagery' },
               ] as { id: MapLayer; label: string }[]
             ).map(opt => (
               <button
@@ -374,6 +378,17 @@ function App() {
                 <span>🚦</span>
                 <span>Trafic {showTraffic ? 'ON' : 'OFF'}</span>
               </button>
+              <button
+                onClick={() => setShowExceptionalRoutes(v => !v)}
+                className={`w-full text-left py-1 px-2 rounded text-[11px] font-medium transition-colors flex items-center gap-1.5 ${
+                  showExceptionalRoutes
+                    ? 'bg-red-500 text-white'
+                    : 'text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                <span>🚛</span>
+                <span>Convois exceptionnels</span>
+              </button>
             </div>
           </div>
         )}
@@ -389,6 +404,7 @@ function App() {
           onContextMenuAction={handleContextMenuAction}
           mapLayer={mapLayer}
           showTraffic={showTraffic}
+          showExceptionalRoutes={showExceptionalRoutes}
         />
         {route.waypoints.length === 0 && (
           <div className="absolute bottom-8 left-1/2 -translate-x-1/2

@@ -1,9 +1,10 @@
-import { useRef, useState, useCallback } from 'react';
+import { useRef, useState, useCallback, useEffect } from 'react';
 import {
   MapContainer,
   TileLayer,
   Marker,
   Polyline,
+  Pane,
   useMapEvents,
 } from 'react-leaflet';
 import L from 'leaflet';
@@ -198,35 +199,11 @@ function cumulativeDistAtClick(
 }
 
 // ── Config fonds de carte ────────────────────────────────────
-const TILE_LAYERS: Record<MapLayer, { url: string; attribution: string; maxZoom?: number }> = {
-  osm: {
-    url:         'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  },
-  'google-road': {
-    url:         'https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
-    attribution: '© <a href="https://maps.google.com">Google Maps</a>',
-    maxZoom:     21,
-  },
-  'google-hybrid': {
-    url:         'https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-    attribution: '© <a href="https://maps.google.com">Google Maps</a>',
-    maxZoom:     22,
-  },
-  'google-terrain': {
-    url:         'https://mt{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}',
-    attribution: '© <a href="https://maps.google.com">Google Maps</a>',
-    maxZoom:     21,
-  },
-};
-
-const GOOGLE_SUBDOMAINS = ['0', '1', '2', '3'];
-
-const TRAFFIC_LAYER = {
-  url:     'https://mt{s}.google.com/vt/lyrs=h,traffic&x={x}&y={y}&z={z}',
-  attribution: '',
-  maxZoom: 21,
-};
+import {
+  BASE_LAYERS,
+  TRAFFIC_LAYER,
+  EXCEPTIONAL_TRANSPORT_WMS,
+} from './mapLayers';
 
 // ── Polyline draggable + tooltip hover ───────────────────────
 interface DraggablePolylineProps {
@@ -348,6 +325,31 @@ const DraggablePolyline = ({
   );
 };
 
+const ExceptionalTransportLayer = () => {
+  const map = useMapEvents({});
+
+  useEffect(() => {
+    const layer = L.tileLayer.wms(
+      EXCEPTIONAL_TRANSPORT_WMS.url,
+      {
+        layers:      EXCEPTIONAL_TRANSPORT_WMS.options.layers,
+        format:      EXCEPTIONAL_TRANSPORT_WMS.options.format,
+        transparent: EXCEPTIONAL_TRANSPORT_WMS.options.transparent,
+        version:     EXCEPTIONAL_TRANSPORT_WMS.options.version,
+        uppercase:   EXCEPTIONAL_TRANSPORT_WMS.options.uppercase,
+        opacity:     EXCEPTIONAL_TRANSPORT_WMS.options.opacity,
+        attribution: EXCEPTIONAL_TRANSPORT_WMS.options.attribution,
+        // Pas de crs forcé : Leaflet utilise EPSG:3857 par défaut,
+        // supporté nativement par ce WMS → pas de reprojection, pas d'erreur BBOX
+      }
+    );
+    layer.addTo(map);
+    return () => { map.removeLayer(layer); };
+  }, [map]);
+
+  return null;
+};
+
 // ── Composant principal ──────────────────────────────────────
 interface MapViewProps {
   waypoints:           Waypoint[];
@@ -357,6 +359,7 @@ interface MapViewProps {
   onContextMenuAction: (action: ContextAction, lat: number, lng: number) => void;
   mapLayer:            MapLayer;
   showTraffic:         boolean;
+  showExceptionalRoutes: boolean;
 }
 
 const MapView = ({
@@ -367,6 +370,7 @@ const MapView = ({
   onContextMenuAction,
   mapLayer,
   showTraffic,
+  showExceptionalRoutes,
 }: MapViewProps) => {
   const suppressClickRef = useRef<number>(0);
   const [contextMenu, setContextMenu] = useState<{
@@ -388,20 +392,23 @@ const MapView = ({
         zoomControl={true}
       >
         <TileLayer
-          key={mapLayer}
-          attribution={TILE_LAYERS[mapLayer].attribution}
-          url={TILE_LAYERS[mapLayer].url}
-          maxZoom={TILE_LAYERS[mapLayer].maxZoom ?? 19}
-          subdomains={mapLayer === 'osm' ? 'abc' : GOOGLE_SUBDOMAINS}
+          attribution={BASE_LAYERS[mapLayer].attribution}
+          url={BASE_LAYERS[mapLayer].url}
+          maxZoom={BASE_LAYERS[mapLayer].maxZoom ?? 19}
         />
         {showTraffic && (
-          <TileLayer
-            key="traffic"
-            url={TRAFFIC_LAYER.url}
-            maxZoom={TRAFFIC_LAYER.maxZoom}
-            subdomains={GOOGLE_SUBDOMAINS}
-            opacity={0.8}
-          />
+          <Pane name="traffic-pane" style={{ zIndex: 450 }}>
+            <TileLayer
+              url={TRAFFIC_LAYER.url}
+              maxZoom={TRAFFIC_LAYER.maxZoom}
+              opacity={0.85}
+            />
+          </Pane>
+        )}
+        {showExceptionalRoutes && (
+          <Pane name="exceptional-pane" style={{ zIndex: 460 }}>
+            <ExceptionalTransportLayer />
+          </Pane>
         )}
 
         <MapEventsHandler onContextMenu={handleContextMenu} />
