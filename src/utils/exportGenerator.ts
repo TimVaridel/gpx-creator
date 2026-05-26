@@ -6,6 +6,7 @@ export interface ExportOptions {
   includeEnd: boolean;
   includeVia: boolean;
   traceColor: string; // hex 6 caractères sans #, ex: "3b82f6"
+  dualExport?: boolean; // export 2 fichiers : sans waypoints + avec tous les waypoints
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -37,8 +38,9 @@ function generateGPX(
   geometry: [number, number][] | undefined,
   routeName: string,
   opts: ExportOptions,
+  overrideWaypoints?: Waypoint[],
 ): string {
-  const filtered = filterWaypoints(waypoints, opts);
+  const filtered = overrideWaypoints ?? filterWaypoints(waypoints, opts);
   const trackPoints = geometry && geometry.length > 0 ? geometry : null;
 
   const wptTags = filtered.map(wp => `
@@ -71,8 +73,9 @@ function generateKML(
   geometry: [number, number][] | undefined,
   routeName: string,
   opts: ExportOptions,
+  overrideWaypoints?: Waypoint[],
 ): string {
-  const filtered = filterWaypoints(waypoints, opts);
+  const filtered = overrideWaypoints ?? filterWaypoints(waypoints, opts);
   const trackPoints = geometry && geometry.length > 0 ? geometry : null;
   const kmlColor = hexToKmlColor(opts.traceColor);
 
@@ -113,9 +116,10 @@ function generateCSV(
   waypoints: Waypoint[],
   geometry: [number, number][] | undefined,
   opts: ExportOptions,
+  overrideWaypoints?: Waypoint[],
 ): string {
   const lines = ['lat,lng,type,name'];
-  const filtered = filterWaypoints(waypoints, opts);
+  const filtered = overrideWaypoints ?? filterWaypoints(waypoints, opts);
 
   filtered.forEach((wp) => {
     const isStart = waypoints.indexOf(wp) === 0;
@@ -132,6 +136,18 @@ function generateCSV(
   return lines.join('\n');
 }
 
+// ── Téléchargement ───────────────────────────────────────────
+
+function downloadBlob(content: string, mime: string, filename: string): void {
+  const blob = new Blob([content], { type: mime });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ── Export principal ─────────────────────────────────────────
 
 export function generateExport(
@@ -140,33 +156,48 @@ export function generateExport(
   routeName: string,
   opts: ExportOptions,
 ): void {
-  let content = '';
-  let mime = '';
-  let ext = '';
+  const { format } = opts;
 
-  switch (opts.format) {
-    case 'gpx':
-      content = generateGPX(waypoints, geometry, routeName, opts);
-      mime = 'application/gpx+xml';
-      ext = 'gpx';
-      break;
-    case 'kml':
-      content = generateKML(waypoints, geometry, routeName, opts);
-      mime = 'application/vnd.google-earth.kml+xml';
-      ext = 'kml';
-      break;
-    case 'csv':
-      content = generateCSV(waypoints, geometry, opts);
-      mime = 'text/csv';
-      ext = 'csv';
-      break;
+  const mimeMap = {
+    gpx: 'application/gpx+xml',
+    kml: 'application/vnd.google-earth.kml+xml',
+    csv: 'text/csv',
+  };
+  const mime = mimeMap[format];
+
+  // ── Mode export double ────────────────────────────────────
+  if (opts.dualExport) {
+    // Fichier 1 : trace seule, sans aucun waypoint
+    const optsNoWp: ExportOptions = { ...opts, includeStart: false, includeEnd: false, includeVia: false };
+    let contentNoWp: string;
+    switch (format) {
+      case 'gpx': contentNoWp = generateGPX(waypoints, geometry, routeName, optsNoWp, []); break;
+      case 'kml': contentNoWp = generateKML(waypoints, geometry, routeName, optsNoWp, []); break;
+      case 'csv': contentNoWp = generateCSV(waypoints, geometry, optsNoWp, []); break;
+    }
+    downloadBlob(contentNoWp, mime, `${routeName}.${format}`);
+
+    // Fichier 2 : trace + tous les waypoints, nom + " wp"
+    let contentAllWp: string;
+    switch (format) {
+      case 'gpx': contentAllWp = generateGPX(waypoints, geometry, routeName, opts, waypoints); break;
+      case 'kml': contentAllWp = generateKML(waypoints, geometry, routeName, opts, waypoints); break;
+      case 'csv': contentAllWp = generateCSV(waypoints, geometry, opts, waypoints); break;
+    }
+    // Petit délai pour que le navigateur ne bloque pas le second téléchargement
+    setTimeout(() => {
+      downloadBlob(contentAllWp, mime, `${routeName} wp.${format}`);
+    }, 300);
+
+    return;
   }
 
-  const blob = new Blob([content], { type: mime });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = `${routeName}.${ext}`;
-  a.click();
-  URL.revokeObjectURL(url);
+  // ── Mode export simple (comportement d'origine) ───────────
+  let content: string;
+  switch (format) {
+    case 'gpx': content = generateGPX(waypoints, geometry, routeName, opts); break;
+    case 'kml': content = generateKML(waypoints, geometry, routeName, opts); break;
+    case 'csv': content = generateCSV(waypoints, geometry, opts); break;
+  }
+  downloadBlob(content, mime, `${routeName}.${format}`);
 }

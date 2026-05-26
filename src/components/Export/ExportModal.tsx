@@ -31,6 +31,7 @@ interface SavedPrefs {
   includeEnd:   boolean;
   includeVia:   boolean;
   traceColor:   string;
+  dualExport:   boolean;
 }
 
 function loadPrefs(): SavedPrefs {
@@ -45,12 +46,31 @@ function loadPrefs(): SavedPrefs {
       includeEnd:   false,
       includeVia:   false,
       traceColor:   '3b82f6',
+      dualExport:   false,
     };
   }
 }
 
 function savePrefs(p: SavedPrefs) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+}
+
+// ── Toggle (défini hors du composant parent pour éviter la recréation) ──────
+function Toggle({
+  value, onChange, disabled = false,
+}: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <div
+      onClick={() => !disabled && onChange(!value)}
+      className={`w-10 h-5 rounded-full relative transition-colors flex-shrink-0
+        ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}
+        ${value && !disabled ? 'bg-blue-500' : 'bg-gray-300'}`}
+    >
+      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow
+        transition-transform ${value && !disabled ? 'translate-x-5' : 'translate-x-0.5'}`}
+      />
+    </div>
+  );
 }
 
 interface Props {
@@ -70,6 +90,7 @@ export default function ExportModal({ onClose, onExport, waypointCount, routeNam
   const [hexInput,     setHexInput]     = useState(prefs.traceColor);
   const [rgb,          setRgb]          = useState<[number, number, number]>(hexToRgb(prefs.traceColor));
   const [hexError,     setHexError]     = useState(false);
+  const [dualExport,   setDualExport]   = useState(prefs.dualExport ?? false);
 
   const safeFileName = routeName.trim().replace(/[/\\?%*:|"<>]/g, '-') || 'itinéraire';
   const hasVia = waypointCount > 2;
@@ -82,6 +103,7 @@ export default function ExportModal({ onClose, onExport, waypointCount, routeNam
       includeEnd,
       includeVia,
       traceColor: hexInput,
+      dualExport,
       ...patch,
     });
   };
@@ -99,6 +121,11 @@ export default function ExportModal({ onClose, onExport, waypointCount, routeNam
   ) => {
     setter(val);
     persist({ [key]: val });
+  };
+
+  const handleDualExport = (val: boolean) => {
+    setDualExport(val);
+    persist({ dualExport: val });
   };
 
   const handlePreset = (hex: string) => {
@@ -131,25 +158,9 @@ export default function ExportModal({ onClose, onExport, waypointCount, routeNam
 
   const handleExport = () => {
     if (hexError || !isValidHex(hexInput)) return;
-    onExport({ format, includeStart, includeEnd, includeVia, traceColor: hexInput });
+    onExport({ format, includeStart, includeEnd, includeVia, traceColor: hexInput, dualExport });
     onClose();
   };
-
-  // ── Sous-composant Toggle ──────────────────────────────
-  const Toggle = ({
-    value, onChange, disabled = false,
-  }: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) => (
-    <div
-      onClick={() => !disabled && onChange(!value)}
-      className={`w-10 h-5 rounded-full relative transition-colors flex-shrink-0
-        ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}
-        ${value && !disabled ? 'bg-blue-500' : 'bg-gray-300'}`}
-    >
-      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow
-        transition-transform ${value && !disabled ? 'translate-x-5' : 'translate-x-0.5'}`}
-      />
-    </div>
-  );
 
   return (
     <>
@@ -175,9 +186,22 @@ export default function ExportModal({ onClose, onExport, waypointCount, routeNam
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
             Nom du fichier
           </p>
-          <div className="bg-gray-50 rounded-xl px-4 py-2.5 text-sm text-gray-700 font-mono truncate">
-            {safeFileName}.{format}
-          </div>
+          {dualExport ? (
+            <div className="flex flex-col gap-1.5">
+              <div className="bg-gray-50 rounded-xl px-4 py-2.5 text-sm text-gray-700 font-mono truncate">
+                {safeFileName}.{format}
+                <span className="ml-2 text-xs text-gray-400 font-sans">(sans waypoints)</span>
+              </div>
+              <div className="bg-blue-50 rounded-xl px-4 py-2.5 text-sm text-blue-700 font-mono truncate">
+                {safeFileName} wp.{format}
+                <span className="ml-2 text-xs text-blue-400 font-sans">(avec tous les waypoints)</span>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-gray-50 rounded-xl px-4 py-2.5 text-sm text-gray-700 font-mono truncate">
+              {safeFileName}.{format}
+            </div>
+          )}
         </section>
 
         {/* Format */}
@@ -205,25 +229,57 @@ export default function ExportModal({ onClose, onExport, waypointCount, routeNam
             Points à inclure
           </p>
           <div className="bg-gray-50 rounded-xl p-3 flex flex-col gap-3">
-            {([
-              { label: '🟢 Point de départ',   value: includeStart, setter: setIncludeStart, key: 'includeStart' as const, disabled: false },
-              { label: '🔵 Points de passage', value: includeVia,   setter: setIncludeVia,   key: 'includeVia'   as const, disabled: !hasVia },
-              { label: "🔴 Point d'arrivée",   value: includeEnd,   setter: setIncludeEnd,   key: 'includeEnd'   as const, disabled: false },
-            ]).map(({ label, value, setter, key, disabled }) => (
-              <label key={label} className="flex items-center gap-3">
-                <Toggle
-                  value={value}
-                  onChange={v => handleToggle(setter, key, v)}
-                  disabled={disabled}
-                />
-                <span className={`text-sm ${disabled ? 'text-gray-400' : 'text-gray-700'}`}>
-                  {label}
-                  {disabled && (
-                    <span className="ml-2 text-xs text-gray-400">(aucun point de passage)</span>
-                  )}
+
+            {/* Toggle export double — séparé visuellement */}
+            <label className="flex items-center gap-3 pb-2.5 border-b border-gray-200">
+              <Toggle
+                value={dualExport}
+                onChange={handleDualExport}
+              />
+              <span className="text-sm font-semibold text-gray-700 flex items-center gap-1.5">
+                📂 Exporter 2 fichiers
+              </span>
+              {dualExport && (
+                <span className="ml-auto text-[10px] text-blue-500 bg-blue-50 rounded px-1.5 py-0.5 font-medium">
+                  actif
                 </span>
-              </label>
-            ))}
+              )}
+            </label>
+
+            {dualExport ? (
+              /* Description du mode dual */
+              <div className="text-xs text-gray-500 space-y-1 px-1">
+                <div className="flex items-start gap-2">
+                  <span className="text-gray-400 mt-0.5">📄</span>
+                  <span><span className="font-mono text-gray-600">{safeFileName}.{format}</span> — trace seule, sans waypoints</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="text-blue-400 mt-0.5">📄</span>
+                  <span><span className="font-mono text-blue-600">{safeFileName} wp.{format}</span> — trace + tous les waypoints</span>
+                </div>
+              </div>
+            ) : (
+              /* Toggles individuels — désactivés si dualExport */
+              ([
+                { label: '🟢 Point de départ',   value: includeStart, setter: setIncludeStart, key: 'includeStart' as const, disabled: false },
+                { label: '🔵 Points de passage', value: includeVia,   setter: setIncludeVia,   key: 'includeVia'   as const, disabled: !hasVia },
+                { label: "🔴 Point d'arrivée",   value: includeEnd,   setter: setIncludeEnd,   key: 'includeEnd'   as const, disabled: false },
+              ]).map(({ label, value, setter, key, disabled }) => (
+                <label key={label} className="flex items-center gap-3">
+                  <Toggle
+                    value={value}
+                    onChange={v => handleToggle(setter, key, v)}
+                    disabled={disabled}
+                  />
+                  <span className={`text-sm ${disabled ? 'text-gray-400' : 'text-gray-700'}`}>
+                    {label}
+                    {disabled && (
+                      <span className="ml-2 text-xs text-gray-400">(aucun point de passage)</span>
+                    )}
+                  </span>
+                </label>
+              ))
+            )}
           </div>
         </section>
 
@@ -295,7 +351,9 @@ export default function ExportModal({ onClose, onExport, waypointCount, routeNam
                      bg-blue-500 hover:bg-blue-600 transition-colors shadow-md
                      disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          Exporter en {format.toUpperCase()}
+          {dualExport
+            ? `Exporter 2 fichiers ${format.toUpperCase()}`
+            : `Exporter en ${format.toUpperCase()}`}
         </button>
       </div>
     </>
