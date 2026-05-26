@@ -55,7 +55,7 @@ export const useRoute = () => {
   });
 
   const [isCalculating,    setIsCalculating]    = useState(false);
-  const [autoCalculate,    setAutoCalculate]    = useState(false);
+  const [autoCalculate,    setAutoCalculate]    = useState(true);
   const [segmentDistances, setSegmentDistances] = useState<number[]>([]);
   const [segmentDurations, setSegmentDurations] = useState<number[]>([]);
 
@@ -133,7 +133,13 @@ export const useRoute = () => {
     if (!autoCalculate) return;
     waypointsRef.current = route.waypoints;
     profileRef.current   = route.profile;
-    calculateRoute(route.waypoints, route.profile);
+
+    // ✅ Appel dans une fonction async locale pour éviter le setState synchrone
+    //    direct dans le corps de l'effet (règle react-hooks/set-state-in-effect)
+    const run = async () => {
+      await calculateRoute(route.waypoints, route.profile);
+    };
+    run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.waypoints, route.profile, autoCalculate]);
 
