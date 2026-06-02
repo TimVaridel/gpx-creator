@@ -13,7 +13,7 @@ import type { Waypoint } from '../../types/route.types';
 import type { MapLayer } from '../../App';
 
 // ── Fix icônes Leaflet ───────────────────────────────────────
-delete (L.Icon.Default.prototype as any)._getIconUrl;
+delete (L.Icon.Default.prototype as typeof L.Icon.Default.prototype & { _getIconUrl?: unknown })._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
   iconUrl:       'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
@@ -64,54 +64,95 @@ type ContextAction = 'start' | 'end' | 'via' | 'via-direct';
 
 interface ContextMenuProps {
   x: number; y: number;
+  lat: number; lng: number;
   onAction: (action: ContextAction) => void;
   onClose: () => void;
 }
 
-const ContextMenu = ({ x, y, onAction, onClose }: ContextMenuProps) => (
-  <>
-    <div className="fixed inset-0 z-[1000]" onClick={onClose} />
-    <ul
-      className="fixed z-[1001] bg-white rounded-xl shadow-2xl border border-gray-100
-                 py-1 min-w-[220px] text-sm text-gray-700 overflow-hidden"
-      style={{ left: x, top: y }}
-    >
-      <li
-        className="px-4 py-2.5 hover:bg-green-50 cursor-pointer flex items-center gap-2.5"
-        onClick={() => { onAction('start'); onClose(); }}
+const ContextMenu = ({ x, y, lat, lng, onAction, onClose }: ContextMenuProps) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyCoords = () => {
+    const text = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => { setCopied(false); onClose(); }, 1000);
+    }).catch(() => onClose());
+  };
+
+  const handleStreetView = () => {
+    // Street View direct — si pas de panorama disponible, Google Maps bascule en vue hybride
+    const url = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+    onClose();
+  };
+
+  return (
+    <>
+      <div className="fixed inset-0 z-[1000]" onClick={onClose} />
+      <ul
+        className="fixed z-[1001] bg-white rounded-xl shadow-2xl border border-gray-100
+                   py-1 min-w-[230px] text-sm text-gray-700 overflow-hidden"
+        style={{ left: x, top: y }}
       >
-        <span className="w-3 h-3 rounded-full bg-green-500 flex-shrink-0" />
-        Définir comme point de départ
-      </li>
-      <li
-        className="px-4 py-2.5 hover:bg-blue-50 cursor-pointer flex items-center gap-2.5"
-        onClick={() => { onAction('via'); onClose(); }}
-      >
-        <span className="w-3 h-3 rounded-full bg-blue-400 flex-shrink-0" />
-        Ajouter un point de passage
-      </li>
-      <li
-        className="px-4 py-2.5 hover:bg-purple-50 cursor-pointer flex items-center gap-2.5"
-        onClick={() => { onAction('via-direct'); onClose(); }}
-      >
-        <span className="w-3 h-3 rounded-full bg-purple-400 flex-shrink-0" />
-        <span className="flex-1">Ajouter un point de passage direct</span>
-        <span className="text-[10px] text-purple-400 bg-purple-50 border border-purple-200
-                         rounded px-1.5 py-0.5 font-medium flex-shrink-0">
-          ligne droite
-        </span>
-      </li>
-      <li className="border-t border-gray-100 my-1" />
-      <li
-        className="px-4 py-2.5 hover:bg-red-50 cursor-pointer flex items-center gap-2.5"
-        onClick={() => { onAction('end'); onClose(); }}
-      >
-        <span className="w-3 h-3 rounded-full bg-red-500 flex-shrink-0" />
-        Itinéraire jusqu'à ce point
-      </li>
-    </ul>
-  </>
-);
+        <li
+          className="px-4 py-2.5 hover:bg-green-50 cursor-pointer flex items-center gap-2.5"
+          onClick={() => { onAction('start'); onClose(); }}
+        >
+          <span className="w-3 h-3 rounded-full bg-green-500 flex-shrink-0" />
+          Définir comme point de départ
+        </li>
+        <li
+          className="px-4 py-2.5 hover:bg-blue-50 cursor-pointer flex items-center gap-2.5"
+          onClick={() => { onAction('via'); onClose(); }}
+        >
+          <span className="w-3 h-3 rounded-full bg-blue-400 flex-shrink-0" />
+          Ajouter un point de passage
+        </li>
+        <li
+          className="px-4 py-2.5 hover:bg-purple-50 cursor-pointer flex items-center gap-2.5"
+          onClick={() => { onAction('via-direct'); onClose(); }}
+        >
+          <span className="w-3 h-3 rounded-full bg-purple-400 flex-shrink-0" />
+          <span className="flex-1">Ajouter un point de passage direct</span>
+          <span className="text-[10px] text-purple-400 bg-purple-50 border border-purple-200
+                           rounded px-1.5 py-0.5 font-medium flex-shrink-0">
+            ligne droite
+          </span>
+        </li>
+        <li className="border-t border-gray-100 my-1" />
+        <li
+          className="px-4 py-2.5 hover:bg-red-50 cursor-pointer flex items-center gap-2.5"
+          onClick={() => { onAction('end'); onClose(); }}
+        >
+          <span className="w-3 h-3 rounded-full bg-red-500 flex-shrink-0" />
+          Itinéraire jusqu'à ce point
+        </li>
+        <li className="border-t border-gray-100 my-1" />
+        <li
+          className="px-4 py-2.5 hover:bg-gray-50 cursor-pointer flex items-center gap-2.5"
+          onClick={handleCopyCoords}
+        >
+          <span className="w-3 h-3 flex items-center justify-center flex-shrink-0 text-gray-400 text-[11px]">📋</span>
+          <span className="flex-1">Copier les coordonnées</span>
+          {copied && (
+            <span className="text-[10px] text-green-500 bg-green-50 border border-green-200
+                             rounded px-1.5 py-0.5 font-medium flex-shrink-0">
+              copié !
+            </span>
+          )}
+        </li>
+        <li
+          className="px-4 py-2.5 hover:bg-gray-50 cursor-pointer flex items-center gap-2.5"
+          onClick={handleStreetView}
+        >
+          <span className="w-3 h-3 flex items-center justify-center flex-shrink-0 text-gray-400 text-[11px]">🗺️</span>
+          Google Street View
+        </li>
+      </ul>
+    </>
+  );
+};
 
 // ── Gestionnaire événements carte ────────────────────────────
 interface MapEventsHandlerProps {
@@ -457,6 +498,8 @@ const MapView = ({
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
+          lat={contextMenu.lat}
+          lng={contextMenu.lng}
           onAction={(action) => {
             onContextMenuAction(action, contextMenu.lat, contextMenu.lng);
             setContextMenu(null);
