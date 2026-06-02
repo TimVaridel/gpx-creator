@@ -62,6 +62,37 @@ const createNumberedIcon = (index: number, total: number, direct = false) => {
 // ── Menu contextuel ──────────────────────────────────────────
 type ContextAction = 'start' | 'end' | 'via' | 'via-direct';
 
+// Conversion WGS84 → LV95 (formule approximative swisstopo)
+function wgs84ToLV95(lat: number, lng: number): [number, number] {
+  // Auxiliaires en secondes d'arc
+  const φ = (lat * 3600 - 169028.66) / 10000;
+  const λ = (lng * 3600 -  26782.5)  / 10000;
+  const E = 2600072.37
+    + 211455.93 * λ
+    -  10938.51 * λ * φ
+    -      0.36 * λ * φ * φ
+    -     44.54 * λ * λ * λ;
+  const N = 1200147.07
+    + 308807.95 * φ
+    +   3745.25 * λ * λ
+    +     76.63 * φ * φ
+    -    194.56 * λ * λ * φ
+    +    119.79 * φ * φ * φ;
+  return [Math.round(E * 100) / 100, Math.round(N * 100) / 100];
+}
+
+// URL SwissTopo convois exceptionnels — layers fixes, centre dynamique en LV95
+const SWISSTOPO_LAYERS = [
+  'WMS|https://wfs.geodienste.ch/kantonale_ausnahmetransportrouten/fra?|obstacle',
+  'WMS|https://wfs.geodienste.ch/kantonale_ausnahmetransportrouten/fra?|route',
+  'ch.swisstopo.amtliches-strassenverzeichnis,f',
+  'ch.bfs.gebaeude_wohnungs_register,f',
+  'ch.swisstopo-vd.ortschaftenverzeichnis_plz,f',
+  'ch.astra.nationalstrassenachsen,f',
+  'ch.bav.schienennetz,f',
+  'ch.bafu.landesforstinventar-vegetationshoehenmodell_relief,f',
+].join(';');
+
 interface ContextMenuProps {
   x: number; y: number;
   lat: number; lng: number;
@@ -81,8 +112,16 @@ const ContextMenu = ({ x, y, lat, lng, onAction, onClose }: ContextMenuProps) =>
   };
 
   const handleStreetView = () => {
-    // Street View direct — si pas de panorama disponible, Google Maps bascule en vue hybride
     const url = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+    onClose();
+  };
+
+  const handleSwissTopo = () => {
+    const [E, N] = wgs84ToLV95(lat, lng);
+    const url = `https://map.geo.admin.ch/#/map?lang=fr&center=${E},${N}&z=7&topic=ech`
+      + `&layers=${encodeURIComponent(SWISSTOPO_LAYERS)}`
+      + `&bgLayer=ch.swisstopo.pixelkarte-farbe`;
     window.open(url, '_blank', 'noopener,noreferrer');
     onClose();
   };
@@ -148,6 +187,13 @@ const ContextMenu = ({ x, y, lat, lng, onAction, onClose }: ContextMenuProps) =>
         >
           <span className="w-3 h-3 flex items-center justify-center flex-shrink-0 text-gray-400 text-[11px]">🗺️</span>
           Google Street View
+        </li>
+        <li
+          className="px-4 py-2.5 hover:bg-red-50 cursor-pointer flex items-center gap-2.5"
+          onClick={handleSwissTopo}
+        >
+          <span className="w-3 h-3 flex items-center justify-center flex-shrink-0 text-[11px]">🚛</span>
+          SwissTopo convois exceptionnels
         </li>
       </ul>
     </>
