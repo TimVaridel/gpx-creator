@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { SavedPlace } from '../../types/savedPlace.types';
 import { getAllPlaces, deletePlace, updatePlaceName, nameExists } from '../../services/savedPlaces';
@@ -16,27 +16,27 @@ export default function SavedPlacesMenu({ anchorEl, onSelect, onClose }: Props) 
   const [editId,   setEditId]   = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editErr,  setEditErr]  = useState<string | null>(null);
-  const [pos,      setPos]      = useState({ bottom: 0, left: 0 });
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!anchorEl) return;
-    const rect = anchorEl.getBoundingClientRect();
-    setPos({
-      bottom: window.innerHeight - rect.top + 4,
-      left:   rect.left,
-    });
-  }, [anchorEl]);
+  // Position calculée directement depuis anchorEl — pas de useEffect+setState
+  const pos = anchorEl
+    ? (() => {
+        const rect = anchorEl.getBoundingClientRect();
+        return { bottom: window.innerHeight - rect.top + 4, left: rect.left };
+      })()
+    : { bottom: 0, left: 0 };
 
-  const load = async () => {
+  // load est stable grâce à useCallback
+  const load = useCallback(async () => {
     setLoading(true);
     try { setPlaces(await getAllPlaces()); }
     finally { setLoading(false); }
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load(); }, [load]);
 
-  // ✅ Fix: proper cleanup function, no createPortal() here
+  // Fermer sur clic extérieur
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (
@@ -48,7 +48,6 @@ export default function SavedPlacesMenu({ anchorEl, onSelect, onClose }: Props) 
     return () => document.removeEventListener('mousedown', handler);
   }, [onClose, anchorEl]);
 
-  // ✅ Fix: plain boolean expression, no createPortal() wrapper
   const filtered = places.filter(p => {
     const q = search.toLowerCase();
     return (
@@ -86,8 +85,8 @@ export default function SavedPlacesMenu({ anchorEl, onSelect, onClose }: Props) 
     <div
       ref={ref}
       className="fixed z-[1500] bg-white border border-gray-200 rounded-xl shadow-2xl
-                 w-64 flex flex-col"
-      style={{ maxHeight: '320px', bottom: pos.bottom, left: pos.left }}
+                 max-w-[80%] flex flex-col max-h-[70%]"
+      style={{ bottom: pos.bottom, left: pos.left }}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">

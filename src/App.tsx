@@ -1,5 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import MapView from './components/Map/MapView';
+import type { MapViewHandle } from './components/Map/MapView';
 import WaypointList from './components/Sidebar/WaypointList';
 import PlaceSearch from './components/Sidebar/PlaceSearch';
 import ExportModal from './components/Export/ExportModal';
@@ -45,7 +46,37 @@ function App() {
   const [showMapMenu,           setShowMapMenu]           = useState(false);
   const [showExceptionalRoutes, setShowExceptionalRoutes] = useState(false);
   const [showSavedPlaces,       setShowSavedPlaces]       = useState(false);
-  const savedPlacesBtnRef = useRef<HTMLButtonElement>(null);
+  const [savedPlacesBtnEl, setSavedPlacesBtnEl] = useState<HTMLButtonElement | null>(null);
+
+  // Ref vers l'API impérative de la carte
+  const mapRef = useRef<MapViewHandle>(null);
+
+  // ── Centrage carte après insertion d'un waypoint ─────────
+  // On écoute les changements de routeGeometry pour fitRoute quand
+  // le calcul automatique vient de terminer après une insertion.
+  const pendingFlyTo = useRef<{ lat: number; lng: number } | null>(null);
+
+  // Appelé à chaque insertion depuis la recherche OSM
+  const flyToAfterInsert = useCallback((lat: number, lng: number) => {
+    if (autoCalculate) {
+      // Le calcul va se déclencher → on mémorise le point,
+      // fitRoute sera appelé dès que routeGeometry change
+      pendingFlyTo.current = { lat, lng };
+    } else {
+      // Pas de calcul auto → centrer directement sur le point
+      mapRef.current?.flyToPoint(lat, lng, 14);
+    }
+  }, [autoCalculate]);
+
+  // Quand la géométrie de l'itinéraire change et qu'un flyTo est en attente,
+  // on zoome sur l'itinéraire complet
+  useEffect(() => {
+    if (!pendingFlyTo.current) return;
+    if (route.routeGeometry && route.routeGeometry.length > 0) {
+      mapRef.current?.fitRoute(route.routeGeometry);
+      pendingFlyTo.current = null;
+    }
+  }, [route.routeGeometry]);
 
   // ── Stats ────────────────────────────────────────────────
   const distanceKm = route.totalDistance
@@ -100,6 +131,11 @@ function App() {
       return next;
     });
   };
+
+  // Callback ref stable pour le bouton lieux enregistrés
+  const savedPlacesBtnRef = useCallback((el: HTMLButtonElement | null) => {
+    setSavedPlacesBtnEl(el);
+  }, []);
 
   const hasGeometry = !!route.routeGeometry?.length;
   const duration    = formatDuration(route.duration);
@@ -222,7 +258,9 @@ function App() {
             <PlaceSearch
               placeholder="Rechercher un point de passage…"
               onSelect={r => {
-                insertWaypoint(r.lat, r.lng, Math.max(1, route.waypoints.length > 1 ? route.waypoints.length - 1 : route.waypoints.length));
+                const idx = Math.max(1, route.waypoints.length > 1 ? route.waypoints.length - 1 : route.waypoints.length);
+                insertWaypoint(r.lat, r.lng, idx);
+                flyToAfterInsert(r.lat, r.lng);
                 setShowAddVia(false);
               }}
               onCancel={() => setShowAddVia(false)}
@@ -259,9 +297,11 @@ function App() {
               {/* Menu lieux enregistrés */}
               {showSavedPlaces && (
                 <SavedPlacesMenu
-                  anchorEl={savedPlacesBtnRef.current}
+                  anchorEl={savedPlacesBtnEl}
                   onSelect={(lat, lng) => {
-                    insertWaypoint(lat, lng, Math.max(1, route.waypoints.length > 1 ? route.waypoints.length - 1 : route.waypoints.length));
+                    const idx = Math.max(1, route.waypoints.length > 1 ? route.waypoints.length - 1 : route.waypoints.length);
+                    insertWaypoint(lat, lng, idx);
+                    flyToAfterInsert(lat, lng);
                   }}
                   onClose={() => setShowSavedPlaces(false)}
                 />
@@ -362,7 +402,6 @@ function App() {
           🗺
         </button>
 
-        {/* Dropdown fond de carte */}
         {showMapMenu && (
           <div
             className="absolute top-8 left-0 bg-white border border-gray-200 rounded-lg
@@ -374,12 +413,12 @@ function App() {
             </p>
             {(
               [
-                { id: 'osm',            label: '🗺 OpenStreetMap' },
-                { id: 'google-road',    label: '🛣 Google Route' },
-                { id: 'google-hybrid',  label: '🛰 Google Hybrid' },
-                { id: 'google-terrain', label: '⛰ Google Terrain' },
-                { id: 'swisstopo',      label: '🏞 Swisstopo' },
-                { id: 'swisstopo-gray', label: '⬜ Swisstopo Gray' },
+                { id: 'osm',               label: '🗺 OpenStreetMap' },
+                { id: 'google-road',       label: '🛣 Google Route' },
+                { id: 'google-hybrid',     label: '🛰 Google Hybrid' },
+                { id: 'google-terrain',    label: '⛰ Google Terrain' },
+                { id: 'swisstopo',         label: '🏞 Swisstopo' },
+                { id: 'swisstopo-gray',    label: '⬜ Swisstopo Gray' },
                 { id: 'swisstopo-imagery', label: '📷 Swisstopo Imagery' },
               ] as { id: MapLayer; label: string }[]
             ).map(opt => (
@@ -426,6 +465,7 @@ function App() {
       {/* ── Carte ── */}
       <main className="flex-1 relative">
         <MapView
+          ref={mapRef}
           waypoints={route.waypoints}
           routeGeometry={route.routeGeometry}
           onMarkerDragEnd={updateWaypointPosition}

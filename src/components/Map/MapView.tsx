@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, useEffect } from 'react';
+import { useRef, useState, useCallback, useEffect, forwardRef, useImperativeHandle } from 'react';
 import {
   MapContainer,
   TileLayer,
@@ -64,7 +64,6 @@ type ContextAction = 'start' | 'end' | 'via' | 'via-direct';
 
 // Conversion WGS84 → LV95 (formule approximative swisstopo)
 function wgs84ToLV95(lat: number, lng: number): [number, number] {
-  // Auxiliaires en secondes d'arc
   const φ = (lat * 3600 - 169028.66) / 10000;
   const λ = (lng * 3600 -  26782.5)  / 10000;
   const E = 2600072.37
@@ -81,7 +80,6 @@ function wgs84ToLV95(lat: number, lng: number): [number, number] {
   return [Math.round(E * 100) / 100, Math.round(N * 100) / 100];
 }
 
-// URL SwissTopo convois exceptionnels — layers fixes, centre dynamique en LV95
 const SWISSTOPO_LAYERS = [
   'WMS|https://wfs.geodienste.ch/kantonale_ausnahmetransportrouten/fra?|obstacle',
   'WMS|https://wfs.geodienste.ch/kantonale_ausnahmetransportrouten/fra?|route',
@@ -309,7 +307,6 @@ const DraggablePolyline = ({
   const insertIndexRef = useRef<number>(0);
   const popupRef       = useRef<L.Popup | null>(null);
 
-  // ── Popup hover ──────────────────────────────────────────
   const openHoverPopup = useCallback((latlng: L.LatLng) => {
     const distKm = (cumulativeDistAtClick(latlng, geometry, map) / 1000).toFixed(1);
 
@@ -337,7 +334,6 @@ const DraggablePolyline = ({
     if (popupRef.current) map.closePopup(popupRef.current);
   }, [map]);
 
-  // ── Handlers polyline ────────────────────────────────────
   const handleMouseMove = useCallback((e: L.LeafletMouseEvent) => {
     if (!isDragging) openHoverPopup(e.latlng);
   }, [isDragging, openHoverPopup]);
@@ -346,7 +342,6 @@ const DraggablePolyline = ({
     closeHoverPopup();
   }, [closeHoverPopup]);
 
-  // ── Drag sans délai ──────────────────────────────────────
   const handleMouseDown = useCallback((e: L.LeafletMouseEvent) => {
     e.originalEvent.stopPropagation();
 
@@ -426,8 +421,6 @@ const ExceptionalTransportLayer = () => {
         uppercase:   EXCEPTIONAL_TRANSPORT_WMS.options.uppercase,
         opacity:     EXCEPTIONAL_TRANSPORT_WMS.options.opacity,
         attribution: EXCEPTIONAL_TRANSPORT_WMS.options.attribution,
-        // Pas de crs forcé : Leaflet utilise EPSG:3857 par défaut,
-        // supporté nativement par ce WMS → pas de reprojection, pas d'erreur BBOX
       }
     );
     layer.addTo(map);
@@ -436,6 +429,23 @@ const ExceptionalTransportLayer = () => {
 
   return null;
 };
+
+// ── Contrôleur interne exposant flyTo / fitBounds ────────────
+// Composant enfant qui a accès à la carte via useMapEvents
+interface MapControllerProps {
+  onReady: (map: L.Map) => void;
+}
+const MapController = ({ onReady }: MapControllerProps) => {
+  const map = useMapEvents({});
+  useEffect(() => { onReady(map); }, [map, onReady]);
+  return null;
+};
+
+// ── API publique exposée via ref ─────────────────────────────
+export interface MapViewHandle {
+  flyToPoint: (lat: number, lng: number, zoom?: number) => void;
+  fitRoute:   (geometry: [number, number][]) => void;
+}
 
 // ── Composant principal ──────────────────────────────────────
 interface MapViewProps {
@@ -449,7 +459,7 @@ interface MapViewProps {
   showExceptionalRoutes: boolean;
 }
 
-const MapView = ({
+const MapView = forwardRef<MapViewHandle, MapViewProps>(({
   waypoints,
   routeGeometry,
   onMarkerDragEnd,
@@ -458,8 +468,9 @@ const MapView = ({
   mapLayer,
   showTraffic,
   showExceptionalRoutes,
-}: MapViewProps) => {
+}, ref) => {
   const suppressClickRef = useRef<number>(0);
+  const mapInstanceRef   = useRef<L.Map | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     lat: number; lng: number; x: number; y: number;
   } | null>(null);
@@ -470,6 +481,22 @@ const MapView = ({
     setContextMenu({ lat, lng, x, y });
   }, []);
 
+  const handleMapReady = useCallback((map: L.Map) => {
+    mapInstanceRef.current = map;
+  }, []);
+
+  // Expose flyToPoint et fitRoute au parent via ref
+  useImperativeHandle(ref, () => ({
+    flyToPoint: (lat, lng, zoom = 14) => {
+      mapInstanceRef.current?.flyTo([lat, lng], zoom, { animate: true, duration: 0.8 });
+    },
+    fitRoute: (geometry) => {
+      if (!mapInstanceRef.current || geometry.length === 0) return;
+      const bounds = L.latLngBounds(geometry.map(([lat, lng]) => L.latLng(lat, lng)));
+      mapInstanceRef.current.flyToBounds(bounds, { padding: [40, 40], animate: true, duration: 0.8 });
+    },
+  }), []);
+
   return (
     <div className="w-full h-full relative">
       <MapContainer
@@ -478,6 +505,8 @@ const MapView = ({
         className="w-full h-full"
         zoomControl={true}
       >
+        <MapController onReady={handleMapReady} />
+
         <TileLayer
           attribution={BASE_LAYERS[mapLayer].attribution}
           url={BASE_LAYERS[mapLayer].url}
@@ -500,7 +529,6 @@ const MapView = ({
 
         <MapEventsHandler onContextMenu={handleContextMenu} />
 
-        {/* Tracé routé draggable */}
         {routeGeometry && routeGeometry.length > 0 && (
           <DraggablePolyline
             geometry={routeGeometry}
@@ -510,7 +538,6 @@ const MapView = ({
           />
         )}
 
-        {/* Tracé pointillé si pas encore de géométrie */}
         {(!routeGeometry || routeGeometry.length === 0) && waypoints.length >= 2 && (
           <Polyline
             positions={waypoints.map(wp => [wp.lat, wp.lng])}
@@ -521,7 +548,6 @@ const MapView = ({
           />
         )}
 
-        {/* Markers numérotés et draggables */}
         {waypoints.map((wp, index) => (
           <Marker
             key={wp.id}
@@ -555,6 +581,8 @@ const MapView = ({
       )}
     </div>
   );
-};
+});
+
+MapView.displayName = 'MapView';
 
 export default MapView;
