@@ -80,33 +80,17 @@ function App() {
   const [insertMode, setInsertMode] = useState<InsertMode>('via');
 
   // ── Menus lieux enregistrés (Fonctionnalité 2) ───────────
-  // Un état par bouton : null = fermé, ou la catégorie ouverte
-  // On utilise un état unique "openMenu" qui stocke soit 'all' soit une SavedPlaceCategory
   type OpenMenu = 'all' | SavedPlaceCategory;
-  const [openMenu, setOpenMenu] = useState<OpenMenu | null>(null);
+  const [openMenu,  setOpenMenu]  = useState<OpenMenu | null>(null);
+  const [anchorEl,  setAnchorEl]  = useState<HTMLElement | null>(null);
 
-  // Refs pour les ancres de chaque bouton (tous les lieux + 4 catégories)
-  const allPlacesBtnRef      = useRef<HTMLButtonElement | null>(null);
-  const categoryBtnRefs      = useRef<Map<SavedPlaceCategory, HTMLButtonElement | null>>(new Map());
-
-  const setAllPlacesBtnRef = useCallback((el: HTMLButtonElement | null) => {
-    allPlacesBtnRef.current = el;
+  const toggleMenu = useCallback((key: OpenMenu, el: HTMLElement) => {
+    setOpenMenu(prev => {
+      if (prev === key) { setAnchorEl(null); return null; }
+      setAnchorEl(el);
+      return key;
+    });
   }, []);
-
-  const setCategoryBtnRef = useCallback(
-    (cat: SavedPlaceCategory) => (el: HTMLButtonElement | null) => {
-      categoryBtnRefs.current.set(cat, el);
-    },
-    [],
-  );
-
-  // Résolution de l'ancre selon le menu ouvert
-  const anchorEl: HTMLElement | null =
-    openMenu === 'all'
-      ? allPlacesBtnRef.current
-      : openMenu !== null
-        ? (categoryBtnRefs.current.get(openMenu as SavedPlaceCategory) ?? null)
-        : null;
 
   // ── Ref vers l'API impérative de la carte ────────────────
   const mapRef = useRef<MapViewHandle>(null);
@@ -364,8 +348,7 @@ function App() {
 
               {/* Tous les lieux enregistrés */}
               <button
-                ref={setAllPlacesBtnRef}
-                onClick={() => setOpenMenu(v => v === 'all' ? null : 'all')}
+                onClick={e => toggleMenu('all', e.currentTarget)}
                 className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors flex-shrink-0
                   ${openMenu === 'all'
                     ? 'bg-yellow-400 text-white border-yellow-400'
@@ -373,19 +356,14 @@ function App() {
                   }`}
                 title="Tous les lieux enregistrés"
               >
-                📍
+                ✅
               </button>
 
               {/* Boutons filtrés par catégorie (Fonctionnalité 2) */}
               {FILTER_CATEGORIES.map(cat => (
                 <button
                   key={cat.value}
-                  ref={setCategoryBtnRef(cat.value)}
-                  onClick={() =>
-                    setOpenMenu(v =>
-                      v === cat.value ? null : (cat.value as SavedPlaceCategory),
-                    )
-                  }
+                  onClick={e => toggleMenu(cat.value as SavedPlaceCategory, e.currentTarget)}
                   className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors flex-shrink-0
                     ${openMenu === cat.value
                       ? 'bg-yellow-400 text-white border-yellow-400'

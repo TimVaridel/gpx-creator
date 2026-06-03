@@ -33,13 +33,20 @@ export default function SavedPlacesMenu({
       })()
     : { bottom: 0, left: 0 };
 
-  const load = useCallback(async () => {
+  const load = useCallback(() => {
     setLoading(true);
-    try { setPlaces(await getAllPlaces()); }
-    finally { setLoading(false); }
+    getAllPlaces()
+      .then(data => setPlaces(data))
+      .catch(() => setPlaces([]))
+      .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Chargement initial — load est stable (useCallback sans deps),
+  // on l'appelle dans un timeout pour sortir du corps synchrone de l'effet
+  useEffect(() => {
+    const id = setTimeout(load, 0);
+    return () => clearTimeout(id);
+  }, [load]);
 
   // Fermer sur clic extérieur (ne se déclenche pas si le modal d'édition est ouvert)
   useEffect(() => {

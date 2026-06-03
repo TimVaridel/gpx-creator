@@ -10,10 +10,10 @@ export const SAVED_PLACE_CATEGORIES: {
   label: string;
   emoji: string;
 }[] = [
-  { value: '',         label: 'Sans catégorie',      emoji: '📍' },
+  { value: '',         label: 'Sans catégorie',      emoji: '✅' },
   { value: 'company',  label: 'Entreprise / dépôt',  emoji: '🏭' },
-  { value: 'border',   label: 'Frontière / douane',  emoji: '🛂' },
-  { value: 'waypoint', label: 'Point intermédiaire', emoji: '🔵' },
+  { value: 'border',   label: 'Frontière / douane',  emoji: '📄' },
+  { value: 'waypoint', label: 'Point intermédiaire', emoji: '📌' },
   { value: 'parking',  label: 'Parking',             emoji: '🅿️' },
 ];
 
