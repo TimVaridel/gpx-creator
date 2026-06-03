@@ -10,8 +10,38 @@ import SavedPlacesMenu from './components/Sidebar/SavedPlacesMenu';
 import { useRoute } from './hooks/useRoute';
 import { generateExport } from './utils/exportGenerator';
 import type { ParsedRoute } from './services/importParser';
+import type { SavedPlaceCategory } from './types/savedPlace.types';
+import { SAVED_PLACE_CATEGORIES } from './types/savedPlace.types';
 
-export type MapLayer = 'osm' | 'google-road' | 'google-hybrid' | 'google-terrain' | 'swisstopo' | 'swisstopo-gray' | 'swisstopo-imagery';
+export type MapLayer =
+  | 'osm'
+  | 'google-road'
+  | 'google-hybrid'
+  | 'google-terrain'
+  | 'swisstopo'
+  | 'swisstopo-gray'
+  | 'swisstopo-imagery';
+
+// ── Mode d'insertion ────────────────────────────────────────
+type InsertMode = 'start' | 'via' | 'end';
+
+/**
+ * Calcule l'index d'insertion dans la liste des waypoints
+ * selon le mode sélectionné. Fonction centralisée — utilisée
+ * par tous les chemins d'insertion (recherche, lieux enregistrés).
+ */
+function getInsertIndex(mode: InsertMode, waypointCount: number): number {
+  switch (mode) {
+    case 'start': return 0;
+    case 'end':   return waypointCount;
+    case 'via':
+    default:      return Math.max(1, waypointCount > 1 ? waypointCount - 1 : waypointCount);
+  }
+}
+
+// ── Catégories filtrées dans la barre de boutons ────────────
+// On affiche les 4 catégories nommées (pas la catégorie vide '')
+const FILTER_CATEGORIES = SAVED_PLACE_CATEGORIES.filter(c => c.value !== '');
 
 function App() {
   const {
@@ -43,33 +73,54 @@ function App() {
   const [sidebarOpen,       setSidebarOpen]        = useState(true);
   const [maxSpeed,          setMaxSpeed]           = useState<number>(60);
   const [segmentSpeeds,     setSegmentSpeeds]      = useState<number[]>([]);
-  const [showMapMenu,           setShowMapMenu]           = useState(false);
-  const [showExceptionalRoutes, setShowExceptionalRoutes] = useState(false);
-  const [showSavedPlaces,       setShowSavedPlaces]       = useState(false);
-  const [savedPlacesBtnEl, setSavedPlacesBtnEl] = useState<HTMLButtonElement | null>(null);
+  const [showMapMenu,             setShowMapMenu]             = useState(false);
+  const [showExceptionalRoutes,   setShowExceptionalRoutes]   = useState(false);
 
-  // Ref vers l'API impérative de la carte
+  // ── Mode d'insertion (Fonctionnalité 3) ──────────────────
+  const [insertMode, setInsertMode] = useState<InsertMode>('via');
+
+  // ── Menus lieux enregistrés (Fonctionnalité 2) ───────────
+  // Un état par bouton : null = fermé, ou la catégorie ouverte
+  // On utilise un état unique "openMenu" qui stocke soit 'all' soit une SavedPlaceCategory
+  type OpenMenu = 'all' | SavedPlaceCategory;
+  const [openMenu, setOpenMenu] = useState<OpenMenu | null>(null);
+
+  // Refs pour les ancres de chaque bouton (tous les lieux + 4 catégories)
+  const allPlacesBtnRef      = useRef<HTMLButtonElement | null>(null);
+  const categoryBtnRefs      = useRef<Map<SavedPlaceCategory, HTMLButtonElement | null>>(new Map());
+
+  const setAllPlacesBtnRef = useCallback((el: HTMLButtonElement | null) => {
+    allPlacesBtnRef.current = el;
+  }, []);
+
+  const setCategoryBtnRef = useCallback(
+    (cat: SavedPlaceCategory) => (el: HTMLButtonElement | null) => {
+      categoryBtnRefs.current.set(cat, el);
+    },
+    [],
+  );
+
+  // Résolution de l'ancre selon le menu ouvert
+  const anchorEl: HTMLElement | null =
+    openMenu === 'all'
+      ? allPlacesBtnRef.current
+      : openMenu !== null
+        ? (categoryBtnRefs.current.get(openMenu as SavedPlaceCategory) ?? null)
+        : null;
+
+  // ── Ref vers l'API impérative de la carte ────────────────
   const mapRef = useRef<MapViewHandle>(null);
 
-  // ── Centrage carte après insertion d'un waypoint ─────────
-  // On écoute les changements de routeGeometry pour fitRoute quand
-  // le calcul automatique vient de terminer après une insertion.
   const pendingFlyTo = useRef<{ lat: number; lng: number } | null>(null);
 
-  // Appelé à chaque insertion depuis la recherche OSM
   const flyToAfterInsert = useCallback((lat: number, lng: number) => {
     if (autoCalculate) {
-      // Le calcul va se déclencher → on mémorise le point,
-      // fitRoute sera appelé dès que routeGeometry change
       pendingFlyTo.current = { lat, lng };
     } else {
-      // Pas de calcul auto → centrer directement sur le point
       mapRef.current?.flyToPoint(lat, lng, 14);
     }
   }, [autoCalculate]);
 
-  // Quand la géométrie de l'itinéraire change et qu'un flyTo est en attente,
-  // on zoome sur l'itinéraire complet
   useEffect(() => {
     if (!pendingFlyTo.current) return;
     if (route.routeGeometry && route.routeGeometry.length > 0) {
@@ -132,13 +183,23 @@ function App() {
     });
   };
 
-  // Callback ref stable pour le bouton lieux enregistrés
-  const savedPlacesBtnRef = useCallback((el: HTMLButtonElement | null) => {
-    setSavedPlacesBtnEl(el);
-  }, []);
+  // ── Insertion depuis lieux enregistrés ou recherche ──────
+  // Callback unique, utilise getInsertIndex()
+  const handlePlaceSelect = useCallback((lat: number, lng: number) => {
+    const idx = getInsertIndex(insertMode, route.waypoints.length);
+    insertWaypoint(lat, lng, idx);
+    flyToAfterInsert(lat, lng);
+  }, [insertMode, route.waypoints.length, insertWaypoint, flyToAfterInsert]);
 
   const hasGeometry = !!route.routeGeometry?.length;
   const duration    = formatDuration(route.duration);
+
+  // ── Labels des boutons toggle ────────────────────────────
+  const INSERT_MODES: { mode: InsertMode; label: string; title: string }[] = [
+    { mode: 'start', label: 'Départ',       title: 'Insérer en première position' },
+    { mode: 'via',   label: 'Intermédiaire', title: 'Insérer en avant-dernière position' },
+    { mode: 'end',   label: 'Arrivée',       title: 'Insérer en dernière position' },
+  ];
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-gray-100">
@@ -252,74 +313,113 @@ function App() {
           />
         </div>
 
-        {/* Boutons : Ajouter un point + Lieux enregistrés */}
-        <div className="px-1 pb-1 border-t border-gray-100 pt-1">
+        {/* ── Zone d'insertion ── */}
+        <div className="px-1 pb-1 border-t border-gray-100 pt-1 space-y-1">
+
+          {/* Boutons toggle mode d'insertion (Fonctionnalité 3) */}
+          <div className="flex gap-1">
+            {INSERT_MODES.map(({ mode, label, title }) => (
+              <button
+                key={mode}
+                onClick={() => setInsertMode(mode)}
+                title={title}
+                className={`flex-1 py-1 rounded text-[11px] font-medium transition-colors border
+                  ${insertMode === mode
+                    ? 'bg-blue-500 text-white border-blue-500'
+                    : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
+                  }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Recherche de point / Boutons lieux enregistrés (Fonctionnalité 2) */}
           {showAddVia ? (
             <PlaceSearch
               placeholder="Rechercher un point de passage…"
               onSelect={r => {
-                const idx = Math.max(1, route.waypoints.length > 1 ? route.waypoints.length - 1 : route.waypoints.length);
-                insertWaypoint(r.lat, r.lng, idx);
-                flyToAfterInsert(r.lat, r.lng);
+                handlePlaceSelect(r.lat, r.lng);
                 setShowAddVia(false);
               }}
               onCancel={() => setShowAddVia(false)}
             />
           ) : (
-            <div className="relative flex gap-1">
+            <div className="flex gap-1 flex-wrap">
+
+              {/* Ajouter un point de passage */}
               <button
                 onClick={() => setShowAddVia(true)}
                 className="flex-1 py-1.5 px-2 rounded-lg text-xs font-medium
                            bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200
-                           transition-colors flex items-center justify-center gap-1.5"
+                           transition-colors flex items-center justify-center gap-1"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none"
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none"
                      viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <line x1="12" y1="5" x2="12" y2="19" />
                   <line x1="5" y1="12" x2="19" y2="12" />
                 </svg>
-                Ajouter un point de passage
+                <span className="whitespace-nowrap">Point</span>
               </button>
 
-              {/* Bouton lieux enregistrés */}
+              {/* Tous les lieux enregistrés */}
               <button
-                ref={savedPlacesBtnRef}
-                onClick={() => setShowSavedPlaces(v => !v)}
-                className={`py-1.5 px-2.5 rounded-lg text-xs font-medium border transition-colors flex-shrink-0
-                  ${showSavedPlaces
+                ref={setAllPlacesBtnRef}
+                onClick={() => setOpenMenu(v => v === 'all' ? null : 'all')}
+                className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors flex-shrink-0
+                  ${openMenu === 'all'
                     ? 'bg-yellow-400 text-white border-yellow-400'
-                    : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100 border-yellow-200'}`}
-                title="Lieux enregistrés"
+                    : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100 border-yellow-200'
+                  }`}
+                title="Tous les lieux enregistrés"
               >
                 📍
               </button>
 
-              {/* Menu lieux enregistrés */}
-              {showSavedPlaces && (
-                <SavedPlacesMenu
-                  anchorEl={savedPlacesBtnEl}
-                  onSelect={(lat, lng) => {
-                    const idx = Math.max(1, route.waypoints.length > 1 ? route.waypoints.length - 1 : route.waypoints.length);
-                    insertWaypoint(lat, lng, idx);
-                    flyToAfterInsert(lat, lng);
-                  }}
-                  onClose={() => setShowSavedPlaces(false)}
-                />
-              )}
+              {/* Boutons filtrés par catégorie (Fonctionnalité 2) */}
+              {FILTER_CATEGORIES.map(cat => (
+                <button
+                  key={cat.value}
+                  ref={setCategoryBtnRef(cat.value)}
+                  onClick={() =>
+                    setOpenMenu(v =>
+                      v === cat.value ? null : (cat.value as SavedPlaceCategory),
+                    )
+                  }
+                  className={`py-1.5 px-2 rounded-lg text-xs font-medium border transition-colors flex-shrink-0
+                    ${openMenu === cat.value
+                      ? 'bg-yellow-400 text-white border-yellow-400'
+                      : 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100 border-yellow-200'
+                    }`}
+                  title={cat.label}
+                >
+                  {cat.emoji}
+                </button>
+              ))}
             </div>
+          )}
+
+          {/* Menu lieux enregistrés (portal) */}
+          {openMenu !== null && (
+            <SavedPlacesMenu
+              anchorEl={anchorEl}
+              onSelect={(lat, lng) => handlePlaceSelect(lat, lng)}
+              onClose={() => setOpenMenu(null)}
+              categoryFilter={openMenu === 'all' ? undefined : (openMenu as SavedPlaceCategory)}
+            />
           )}
         </div>
 
-        {/* Actions */}
-        <div className="p-2 border-t border-gray-200 space-y-1.5">
+        {/* ── Actions compactées (Fonctionnalité 4) ── */}
+        <div className="p-1.5 border-t border-gray-200 space-y-1">
 
-          <ImportButton onImport={handleImport} />
-
-          <div className="grid grid-cols-2 gap-1.5">
+          {/* Ligne 1 : Import | Planning | Export */}
+          <div className="grid grid-cols-3 gap-1">
+            <ImportButton onImport={handleImport} />
             <button
               onClick={() => setShowPlanningModal(true)}
               disabled={route.waypoints.length < 2}
-              className={`py-2 px-2 rounded-lg font-semibold text-xs
+              className={`py-1.5 px-1 rounded-lg font-semibold text-xs
                 transition-all flex items-center justify-center gap-1
                 ${route.waypoints.length >= 2
                   ? 'bg-indigo-500 hover:bg-indigo-600 text-white shadow'
@@ -330,7 +430,7 @@ function App() {
             <button
               onClick={() => setShowExportModal(true)}
               disabled={route.waypoints.length < 2}
-              className={`py-2 px-2 rounded-lg font-semibold text-xs
+              className={`py-1.5 px-1 rounded-lg font-semibold text-xs
                 transition-all flex items-center justify-center gap-1
                 ${route.waypoints.length >= 2
                   ? 'bg-green-500 hover:bg-green-600 text-white shadow'
@@ -340,11 +440,12 @@ function App() {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-1.5">
+          {/* Ligne 2 : Inverser | Suppr. trace | Effacer */}
+          <div className="grid grid-cols-3 gap-1">
             <button
               onClick={reverseRoute}
               disabled={route.waypoints.length < 2}
-              className="py-1.5 px-2 rounded-lg text-xs font-medium
+              className="py-1.5 px-1 rounded-lg text-xs font-medium
                          text-blue-600 bg-blue-50 hover:bg-blue-100
                          disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
@@ -353,23 +454,22 @@ function App() {
             <button
               onClick={clearGeometry}
               disabled={!hasGeometry}
-              className="py-1.5 px-2 rounded-lg text-xs font-medium
+              className="py-1.5 px-1 rounded-lg text-xs font-medium
                          text-orange-600 bg-orange-50 hover:bg-orange-100
                          disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              ✂️ Suppr. trace
+              ✂️ Trace
+            </button>
+            <button
+              onClick={() => { if (confirm("Effacer tout l'itinéraire ?")) clearRoute(); }}
+              disabled={route.waypoints.length === 0}
+              className="py-1.5 px-1 rounded-lg text-xs font-medium
+                         text-gray-600 bg-gray-100 hover:bg-gray-200
+                         disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              🗑️ Effacer
             </button>
           </div>
-
-          <button
-            onClick={() => { if (confirm("Effacer tout l'itinéraire ?")) clearRoute(); }}
-            disabled={route.waypoints.length === 0}
-            className="w-full py-1.5 px-2 rounded-lg text-xs font-medium
-                       text-gray-600 bg-gray-100 hover:bg-gray-200
-                       disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            🗑️ Effacer l'itinéraire
-          </button>
         </div>
       </aside>
 
@@ -437,22 +537,24 @@ function App() {
             <div className="border-t border-gray-100 pt-1">
               <button
                 onClick={() => setShowTraffic(v => !v)}
-                className={`w-full text-left py-1 px-2 rounded text-[11px] font-medium transition-colors flex items-center gap-1.5 ${
-                  showTraffic
+                className={`w-full text-left py-1 px-2 rounded text-[11px] font-medium
+                            transition-colors flex items-center gap-1.5
+                  ${showTraffic
                     ? 'bg-orange-500 text-white'
                     : 'text-gray-700 hover:bg-gray-100'
-                }`}
+                  }`}
               >
                 <span>🚦</span>
                 <span>Trafic {showTraffic ? 'ON' : 'OFF'}</span>
               </button>
               <button
                 onClick={() => setShowExceptionalRoutes(v => !v)}
-                className={`w-full text-left py-1 px-2 rounded text-[11px] font-medium transition-colors flex items-center gap-1.5 ${
-                  showExceptionalRoutes
+                className={`w-full text-left py-1 px-2 rounded text-[11px] font-medium
+                            transition-colors flex items-center gap-1.5
+                  ${showExceptionalRoutes
                     ? 'bg-red-500 text-white'
                     : 'text-gray-700 hover:bg-gray-100'
-                }`}
+                  }`}
               >
                 <span>🚛</span>
                 <span>Convois exceptionnels</span>
