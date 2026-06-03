@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import MapView from './components/Map/MapView';
 import WaypointList from './components/Sidebar/WaypointList';
 import PlaceSearch from './components/Sidebar/PlaceSearch';
 import ExportModal from './components/Export/ExportModal';
 import PlanningModal from './components/Planning/PlanningModal';
 import ImportButton from './components/Sidebar/ImportButton';
+import SavedPlacesMenu from './components/Sidebar/SavedPlacesMenu';
 import { useRoute } from './hooks/useRoute';
 import { generateExport } from './utils/exportGenerator';
 import type { ParsedRoute } from './services/importParser';
@@ -41,8 +42,10 @@ function App() {
   const [sidebarOpen,       setSidebarOpen]        = useState(true);
   const [maxSpeed,          setMaxSpeed]           = useState<number>(60);
   const [segmentSpeeds,     setSegmentSpeeds]      = useState<number[]>([]);
-  const [showMapMenu,       setShowMapMenu]        = useState(false);
+  const [showMapMenu,           setShowMapMenu]           = useState(false);
   const [showExceptionalRoutes, setShowExceptionalRoutes] = useState(false);
+  const [showSavedPlaces,       setShowSavedPlaces]       = useState(false);
+  const savedPlacesBtnRef = useRef<HTMLButtonElement>(null);
 
   // ── Stats ────────────────────────────────────────────────
   const distanceKm = route.totalDistance
@@ -213,7 +216,7 @@ function App() {
           />
         </div>
 
-        {/* Bouton Ajouter un point de passage */}
+        {/* Boutons : Ajouter un point + Lieux enregistrés */}
         <div className="px-1 pb-1 border-t border-gray-100 pt-1">
           {showAddVia ? (
             <PlaceSearch
@@ -225,19 +228,45 @@ function App() {
               onCancel={() => setShowAddVia(false)}
             />
           ) : (
-            <button
-              onClick={() => setShowAddVia(true)}
-              className="w-full py-1.5 px-2 rounded-lg text-xs font-medium
-                         bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200
-                         transition-colors flex items-center justify-center gap-1.5"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none"
-                   viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              Ajouter un point de passage
-            </button>
+            <div className="relative flex gap-1">
+              <button
+                onClick={() => setShowAddVia(true)}
+                className="flex-1 py-1.5 px-2 rounded-lg text-xs font-medium
+                           bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200
+                           transition-colors flex items-center justify-center gap-1.5"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none"
+                     viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                Ajouter un point de passage
+              </button>
+
+              {/* Bouton lieux enregistrés */}
+              <button
+                ref={savedPlacesBtnRef}
+                onClick={() => setShowSavedPlaces(v => !v)}
+                className={`py-1.5 px-2.5 rounded-lg text-xs font-medium border transition-colors flex-shrink-0
+                  ${showSavedPlaces
+                    ? 'bg-yellow-400 text-white border-yellow-400'
+                    : 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100 border-yellow-200'}`}
+                title="Lieux enregistrés"
+              >
+                📍
+              </button>
+
+              {/* Menu lieux enregistrés */}
+              {showSavedPlaces && (
+                <SavedPlacesMenu
+                  anchorEl={savedPlacesBtnRef.current}
+                  onSelect={(lat, lng) => {
+                    insertWaypoint(lat, lng, Math.max(1, route.waypoints.length > 1 ? route.waypoints.length - 1 : route.waypoints.length));
+                  }}
+                  onClose={() => setShowSavedPlaces(false)}
+                />
+              )}
+            </div>
           )}
         </div>
 

@@ -16,6 +16,7 @@ import { CSS } from '@dnd-kit/utilities';
 import type { Waypoint } from '../../types/route.types';
 import PlaceSearch from './PlaceSearch';
 import type { PlaceResult } from '../../services/geocoding';
+import SavePlaceModal from './SavePlaceModal';
 
 const DEFAULT_SPEED = 60;
 
@@ -81,14 +82,15 @@ interface SortableItemProps {
   total: number;
   onRemove: (id: string) => void;
   onUpdatePosition: (id: string, lat: number, lng: number) => void;
+  onSavePlace: (waypoint: Waypoint) => void;
   distFromPrev?: number;
-  durFromPrev?: number;    // secondes OSRM
-  segSpeed?: number;       // km/h vitesse perso pour ce segment
+  durFromPrev?: number;
+  segSpeed?: number;
   onSpeedChange?: (speed: number) => void;
 }
 
 const SortableItem = ({
-  waypoint, index, total, onRemove, onUpdatePosition,
+  waypoint, index, total, onRemove, onUpdatePosition, onSavePlace,
   distFromPrev, durFromPrev, segSpeed, onSpeedChange,
 }: SortableItemProps) => {
   const {
@@ -216,6 +218,21 @@ const SortableItem = ({
             </span>
           )}
 
+          {/* Enregistrer */}
+          <button
+            onClick={() => onSavePlace(waypoint)}
+            className="text-gray-300 hover:text-yellow-500 transition-colors flex-shrink-0"
+            title="Enregistrer ce lieu"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none"
+                 viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                    d="M5 5a2 2 0 012-2h7.586a2 2 0 011.414.586l2.414 2.414A2 2 0 0119 7.586V19a2 2 0 01-2 2H7a2 2 0 01-2-2V5z"/>
+              <path strokeLinecap="round" strokeLinejoin="round"
+                    d="M15 3v4a1 1 0 001 1h4M9 13h6M9 17h3"/>
+            </svg>
+          </button>
+
           {/* Loupe */}
           <button
             onClick={() => setSearching(s => !s)}
@@ -290,6 +307,8 @@ const WaypointList = ({
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
+  const [savingWaypoint, setSavingWaypoint] = useState<Waypoint | null>(null);
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -315,13 +334,14 @@ const WaypointList = ({
               onSearchSelect={r => onSetStart(r.lat, r.lng)}
             />
           ) : (
-            <SortableItem
+          <SortableItem
               key={waypoints[0].id}
               waypoint={waypoints[0]}
               index={0}
               total={waypoints.length}
               onRemove={onRemove}
               onUpdatePosition={onUpdatePosition}
+              onSavePlace={setSavingWaypoint}
             />
           )}
 
@@ -334,6 +354,7 @@ const WaypointList = ({
               total={waypoints.length}
               onRemove={onRemove}
               onUpdatePosition={onUpdatePosition}
+              onSavePlace={setSavingWaypoint}
               distFromPrev={segmentDistances?.[i + 1]}
               durFromPrev={segmentDurations?.[i + 1]}
               segSpeed={segmentSpeeds?.[i + 1]}
@@ -356,6 +377,7 @@ const WaypointList = ({
               total={waypoints.length}
               onRemove={onRemove}
               onUpdatePosition={onUpdatePosition}
+              onSavePlace={setSavingWaypoint}
               distFromPrev={segmentDistances?.[waypoints.length - 1]}
               durFromPrev={segmentDurations?.[waypoints.length - 1]}
               segSpeed={segmentSpeeds?.[waypoints.length - 1]}
@@ -365,6 +387,16 @@ const WaypointList = ({
 
         </ul>
       </SortableContext>
+
+      {savingWaypoint && (
+        <SavePlaceModal
+          defaultName={savingWaypoint.locality ?? savingWaypoint.name ?? ''}
+          lat={savingWaypoint.lat}
+          lng={savingWaypoint.lng}
+          onClose={() => setSavingWaypoint(null)}
+          onSaved={() => setSavingWaypoint(null)}
+        />
+      )}
     </DndContext>
   );
 };
