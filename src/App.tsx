@@ -125,6 +125,10 @@ function App() {
     }
   }, [autoCalculate]);
 
+  const handleWaypointClick = useCallback((lat: number, lng: number) => {
+    mapRef.current?.flyToPoint(lat, lng, 15);
+  }, []);
+
   useEffect(() => {
     if (!pendingFlyTo.current) return;
     if (route.routeGeometry && route.routeGeometry.length > 0) {
@@ -329,6 +333,7 @@ function App() {
             onExtendGroup={extendGroup}
             onToggleGroupExpanded={toggleGroupExpanded}
             onRemoveWaypointFromGroup={removeWaypointFromGroup}
+            onWaypointClick={handleWaypointClick}
             compact={!sidebarWide}
           />
         </div>

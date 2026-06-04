@@ -212,6 +212,7 @@ interface SortableItemProps {
   isGroupBoundary?: boolean;
   onRemoveFromGroup?: () => void;
   onAddGroup?: (fromWpIndex: number, toWpIndex: number) => void;
+  onWaypointClick?: (lat: number, lng: number) => void;
   compact?: boolean;
   savedPlaceName?: string;
 }
@@ -220,7 +221,7 @@ const SortableItem = ({
   waypoint, index, total, onRemove, onUpdatePosition, onSavePlace,
   distFromPrev, durFromPrev, segSpeed, onSpeedChange, isInGroup,
   showSegmentConnector, isGroupBoundary, onRemoveFromGroup, onAddGroup,
-  compact, savedPlaceName,
+  onWaypointClick, compact, savedPlaceName,
 }: SortableItemProps) => {
   const {
     attributes, listeners, setNodeRef,
@@ -325,14 +326,21 @@ const SortableItem = ({
             ⠿
           </button>
 
-          {/* Numéro */}
-          <span className={`
-            w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0
-            text-[10px] font-bold text-white ${dotColor}
-            ${isInGroup ? 'opacity-60' : ''}
-          `}>
+          {/* Numéro — clic = zoom sur la carte */}
+          <button
+            type="button"
+            onClick={() => onWaypointClick?.(waypoint.lat, waypoint.lng)}
+            className={`
+              w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0
+              text-[10px] font-bold text-white cursor-pointer
+              hover:ring-2 hover:ring-offset-1 hover:ring-blue-300 transition-all
+              ${dotColor}
+              ${isInGroup ? 'opacity-60' : ''}
+            `}
+            title="Centrer la carte sur ce point"
+          >
             {index + 1}
-          </span>
+          </button>
 
           {/* Infos */}
           <div className="flex-1 min-w-0">
@@ -446,6 +454,7 @@ interface WaypointListProps {
   onExtendGroup: (groupId: string, toWpIndex: number) => void;
   onToggleGroupExpanded: (groupId: string) => void;
   onRemoveWaypointFromGroup: (groupId: string, wpIndex: number) => void;
+  onWaypointClick?: (lat: number, lng: number) => void;
   compact?: boolean;
 }
 
@@ -467,6 +476,7 @@ const WaypointList = ({
   onExtendGroup,
   onToggleGroupExpanded,
   onRemoveWaypointFromGroup,
+  onWaypointClick,
   compact,
 }: WaypointListProps) => {
   const sensors = useSensors(
@@ -590,6 +600,7 @@ const WaypointList = ({
               isGroupBoundary={true}
               onRemoveFromGroup={() => onRemoveWaypointFromGroup(group.id, i)}
               onAddGroup={undefined}
+              onWaypointClick={onWaypointClick}
               compact={compact}
               savedPlaceName={findSavedPlace(waypoints[i].lat, waypoints[i].lng)?.name}
             />
@@ -633,6 +644,7 @@ const WaypointList = ({
               : undefined
           }
           onAddGroup={!isInGroup ? onAddGroup : undefined}
+          onWaypointClick={onWaypointClick}
           compact={compact}
           savedPlaceName={findSavedPlace(waypoints[i].lat, waypoints[i].lng)?.name}
         />
