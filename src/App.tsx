@@ -1,4 +1,10 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { Routes, Route } from 'react-router-dom';
+import { useAuth } from './contexts/AuthContext';
+import ProtectedRoute from './components/ProtectedRoute';
+import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+import AdminPage from './pages/AdminPage';
 import MapView from './components/Map/MapView';
 import type { MapViewHandle } from './components/Map/MapView';
 import WaypointList from './components/Sidebar/WaypointList';
@@ -45,7 +51,34 @@ function getInsertIndex(mode: InsertMode, waypointCount: number): number {
 // On affiche les 4 catégories nommées (pas la catégorie vide '')
 const FILTER_CATEGORIES = SAVED_PLACE_CATEGORIES.filter(c => c.value !== '');
 
+// ── Shell de routage ────────────────────────────────────────
 function App() {
+  const { loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen w-screen bg-gray-100">
+        <div className="text-sm text-gray-500 animate-pulse">Chargement…</div>
+      </div>
+    );
+  }
+
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
+      <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
+      <Route path="/*" element={
+        <ProtectedRoute><MainApp /></ProtectedRoute>
+      } />
+    </Routes>
+  );
+}
+
+// ── Application principale (authentifiée) ────────────────────
+function MainApp() {
+  const { user, signOut } = useAuth();
+
   const {
     route,
     isCalculating,
@@ -348,6 +381,22 @@ function App() {
               </span>
             </div>
           )}
+        </div>
+
+        {/* Utilisateur connecté + déconnexion */}
+        <div className="px-3 py-1.5 border-b border-gray-100 flex items-center justify-between">
+          <span className="text-[10px] text-gray-400 truncate max-w-[160px]">
+            {user?.email}
+          </span>
+          <button
+            onClick={signOut}
+            className="text-[9px] text-red-400 hover:text-red-600
+                       border border-dashed border-red-200 rounded px-1.5 py-0.5
+                       hover:bg-red-50 transition-colors flex-shrink-0"
+            title="Se déconnecter"
+          >
+            Déconnexion
+          </button>
         </div>
 
         {/* Stats compactes */}
