@@ -283,7 +283,11 @@ export const useRoute = () => {
     setSegmentDistances([]);
     setSegmentDurations([]);
 
-    waypoints.forEach(wp => enrichWithLocality(wp.id, wp.lat, wp.lng, setRoute));
+    (async () => {
+      for (const wp of waypoints) {
+        await enrichWithLocality(wp.id, wp.lat, wp.lng, setRoute);
+      }
+    })();
   }, []);
 
   return {

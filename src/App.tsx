@@ -8,6 +8,7 @@ import PlanningModal from './components/Planning/PlanningModal';
 import ImportButton from './components/Sidebar/ImportButton';
 import SavedPlacesMenu from './components/Sidebar/SavedPlacesMenu';
 import { useRoute } from './hooks/useRoute';
+import { useGroups, useGroupMetrics } from './store/routeStore';
 import { generateExport } from './utils/exportGenerator';
 import type { ParsedRoute } from './services/importParser';
 import type { SavedPlaceCategory } from './types/savedPlace.types';
@@ -64,6 +65,24 @@ function App() {
     importRoute,
   } = useRoute();
 
+  // ── Groupes (nouveau système unifié) ──────────────────────────
+  const {
+    groups,
+    addGroup,
+    removeGroup,
+    updateGroup,
+    rebaseGroups,
+    extendGroup,
+    toggleGroupExpanded,
+    removeWaypointFromGroup,
+  } = useGroups();
+
+  const { groupMetrics } = useGroupMetrics(
+    groups,
+    segmentDistances,
+    route.waypoints,
+  );
+
   const [isEditingName,     setIsEditingName]     = useState(false);
   const [showExportModal,   setShowExportModal]    = useState(false);
   const [showPlanningModal, setShowPlanningModal]  = useState(false);
@@ -71,6 +90,7 @@ function App() {
   const [mapLayer,          setMapLayer]           = useState<MapLayer>('osm');
   const [showTraffic,       setShowTraffic]        = useState(false);
   const [sidebarOpen,       setSidebarOpen]        = useState(true);
+  const [sidebarWide,       setSidebarWide]        = useState(false);
   const [maxSpeed,          setMaxSpeed]           = useState<number>(60);
   const [segmentSpeeds,     setSegmentSpeeds]      = useState<number[]>([]);
   const [showMapMenu,             setShowMapMenu]             = useState(false);
@@ -175,8 +195,9 @@ function App() {
     flyToAfterInsert(lat, lng);
   }, [insertMode, route.waypoints.length, insertWaypoint, flyToAfterInsert]);
 
-  const hasGeometry = !!route.routeGeometry?.length;
-  const duration    = formatDuration(route.duration);
+  const sidebarWidth   = sidebarWide ? 432 : 288;
+  const hasGeometry    = !!route.routeGeometry?.length;
+  const duration       = formatDuration(route.duration);
 
   // ── Labels des boutons toggle ────────────────────────────
   const INSERT_MODES: { mode: InsertMode; label: string; title: string }[] = [
@@ -189,7 +210,7 @@ function App() {
     <div className="flex h-screen w-screen overflow-hidden bg-gray-100">
 
       {/* ── Sidebar gauche ── */}
-      <aside className={`relative bg-white shadow-lg flex flex-col z-10 transition-all duration-300 ${sidebarOpen ? 'w-72' : 'w-0 overflow-hidden'}`}>
+      <aside className={`relative bg-white shadow-lg flex flex-col z-10 transition-all duration-300 ${sidebarOpen ? (sidebarWide ? 'w-[432px]' : 'w-72') : 'w-0 overflow-hidden'}`}>
 
         {/* Nom de l'itinéraire */}
         <div className="px-3 py-2 border-b border-gray-200">
@@ -285,8 +306,16 @@ function App() {
         <div className="flex-1 overflow-y-auto px-1 py-0.5">
           <WaypointList
             waypoints={route.waypoints}
+            groups={groupMetrics}
             onRemove={removeWaypoint}
-            onReorder={moveWaypoint}
+            onReorder={(fromIndex, toIndex) => {
+              const oldWps = [...route.waypoints];
+              const newWps = [...oldWps];
+              const [moved] = newWps.splice(fromIndex, 1);
+              newWps.splice(toIndex, 0, moved);
+              moveWaypoint(fromIndex, toIndex);
+              rebaseGroups(oldWps, newWps);
+            }}
             onUpdatePosition={updateWaypointPosition}
             onSetStart={(lat, lng) => insertWaypoint(lat, lng, 0)}
             onSetEnd={(lat, lng) => insertWaypoint(lat, lng, route.waypoints.length)}
@@ -294,6 +323,13 @@ function App() {
             segmentDurations={segmentDurations}
             segmentSpeeds={segmentSpeeds}
             onSegmentSpeedChange={handleSegmentSpeedChange}
+            onAddGroup={addGroup}
+            onRemoveGroup={removeGroup}
+            onUpdateGroup={updateGroup}
+            onExtendGroup={extendGroup}
+            onToggleGroupExpanded={toggleGroupExpanded}
+            onRemoveWaypointFromGroup={removeWaypointFromGroup}
+            compact={!sidebarWide}
           />
         </div>
 
@@ -451,22 +487,34 @@ function App() {
         </div>
       </aside>
 
-      {/* Bouton toggle sidebar */}
-      <button
-        onClick={() => setSidebarOpen(o => !o)}
-        className={`fixed top-20 z-[1000] w-7 h-7 bg-white border border-gray-300
-                    rounded shadow-md flex items-center justify-center
-                    text-gray-600 hover:text-blue-500 hover:bg-blue-50
-                    transition-all duration-300
-                    ${sidebarOpen ? 'left-[288px]' : 'left-2'}`}
-        title={sidebarOpen ? 'Réduire le panneau' : 'Ouvrir le panneau'}
-      >
-        {sidebarOpen ? '◀' : '▶'}
-      </button>
+      {/* Boutons toggle sidebar + largeur */}
+      <div className="fixed top-20 z-[1000] flex gap-0.5 transition-all duration-300"
+           style={{ left: sidebarOpen ? sidebarWidth : 8 }}>
+        <button
+          onClick={() => setSidebarOpen(o => !o)}
+          className="w-7 h-7 bg-white border border-gray-300 rounded shadow-md
+                     flex items-center justify-center text-gray-600
+                     hover:text-blue-500 hover:bg-blue-50 transition-colors"
+          title={sidebarOpen ? 'Réduire le panneau' : 'Ouvrir le panneau'}
+        >
+          {sidebarOpen ? '◀' : '▶'}
+        </button>
+        {sidebarOpen && (
+          <button
+            onClick={() => setSidebarWide(w => !w)}
+            className="w-7 h-7 bg-white border border-gray-300 rounded shadow-md
+                       flex items-center justify-center text-xs font-bold
+                       hover:text-blue-500 hover:bg-blue-50 transition-colors"
+            title={sidebarWide ? 'Largeur normale' : 'Largeur agrandie (×1.5)'}
+          >
+            ↔️
+          </button>
+        )}
+      </div>
 
       {/* Bouton fond de carte flottant */}
-      <div className={`fixed top-28 z-[1000] transition-all duration-300
-                       ${sidebarOpen ? 'left-[288px]' : 'left-2'}`}>
+      <div className="fixed top-28 z-[1000] transition-all duration-300"
+           style={{ left: sidebarOpen ? sidebarWidth : 8 }}>
         <button
           onClick={() => setShowMapMenu(v => !v)}
           className={`w-7 h-7 border rounded shadow-md flex items-center justify-center
