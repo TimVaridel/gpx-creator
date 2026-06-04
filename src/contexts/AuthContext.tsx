@@ -38,6 +38,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfileLoading(false);
   }, []);
 
+  // Timeout de sécurité : force loading=false après 8s
+  useEffect(() => {
+    const timer = setTimeout(() => setLoading(false), 8000);
+    return () => clearTimeout(timer);
+  }, []);
+
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);

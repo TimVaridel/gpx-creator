@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Link } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import LoginPage from './pages/LoginPage';
@@ -77,7 +77,7 @@ function App() {
 
 // ── Application principale (authentifiée) ────────────────────
 function MainApp() {
-  const { user, signOut } = useAuth();
+  const { user, profile, signOut } = useAuth();
 
   const {
     route,
@@ -383,20 +383,32 @@ function MainApp() {
           )}
         </div>
 
-        {/* Utilisateur connecté + déconnexion */}
-        <div className="px-3 py-1.5 border-b border-gray-100 flex items-center justify-between">
-          <span className="text-[10px] text-gray-400 truncate max-w-[160px]">
+        {/* Utilisateur connecté + admin + déconnexion */}
+        <div className="px-3 py-1.5 border-b border-gray-100 flex items-center justify-between gap-1">
+          <span className="text-[10px] text-gray-400 truncate max-w-[140px]">
             {user?.email}
           </span>
-          <button
-            onClick={signOut}
-            className="text-[9px] text-red-400 hover:text-red-600
-                       border border-dashed border-red-200 rounded px-1.5 py-0.5
-                       hover:bg-red-50 transition-colors flex-shrink-0"
-            title="Se déconnecter"
-          >
-            Déconnexion
-          </button>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {profile?.is_admin && (
+              <Link
+                to="/admin"
+                className="text-[9px] text-indigo-500 hover:text-indigo-700
+                           border border-dashed border-indigo-200 rounded px-1.5 py-0.5
+                           hover:bg-indigo-50 transition-colors"
+              >
+                Admin
+              </Link>
+            )}
+            <button
+              onClick={signOut}
+              className="text-[9px] text-red-400 hover:text-red-600
+                         border border-dashed border-red-200 rounded px-1.5 py-0.5
+                         hover:bg-red-50 transition-colors"
+              title="Se déconnecter"
+            >
+              Déconnexion
+            </button>
+          </div>
         </div>
 
         {/* Stats compactes */}
