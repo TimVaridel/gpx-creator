@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import MapView from './components/Map/MapView';
 import type { MapViewHandle } from './components/Map/MapView';
 import WaypointList from './components/Sidebar/WaypointList';
@@ -11,6 +11,7 @@ import { useRoute } from './hooks/useRoute';
 import { useGroups, useGroupMetrics } from './store/routeStore';
 import { generateExport } from './utils/exportGenerator';
 import type { ParsedRoute } from './services/importParser';
+import type { Group } from './types/route.types';
 import type { SavedPlaceCategory } from './types/savedPlace.types';
 import { SAVED_PLACE_CATEGORIES } from './types/savedPlace.types';
 
@@ -58,6 +59,7 @@ function App() {
     removeWaypoint,
     updateWaypointPosition,
     moveWaypoint,
+    setWaypoints,
     renameRoute,
     clearRoute,
     clearGeometry,
@@ -75,6 +77,7 @@ function App() {
     extendGroup,
     toggleGroupExpanded,
     removeWaypointFromGroup,
+    resetAllDurations,
   } = useGroups();
 
   const { groupMetrics } = useGroupMetrics(
@@ -91,8 +94,11 @@ function App() {
   const [showTraffic,       setShowTraffic]        = useState(false);
   const [sidebarOpen,       setSidebarOpen]        = useState(true);
   const [sidebarWide,       setSidebarWide]        = useState(false);
-  const [maxSpeed,          setMaxSpeed]           = useState<number>(60);
-  const [segmentSpeeds,     setSegmentSpeeds]      = useState<number[]>([]);
+  const [maxSpeed,                setMaxSpeed]           = useState<number>(60);
+  const [segmentSpeeds,           setSegmentSpeeds]      = useState<number[]>([]);
+  const [manualSegmentDuration,   setManualSegmentDuration] = useState<(number | null)[]>([]);
+  const [segmentPause,            setSegmentPause]            = useState<number[]>([]);
+  const [segmentRemark,           setSegmentRemark]           = useState<string[]>([]);
   const [showMapMenu,             setShowMapMenu]             = useState(false);
   const [showExceptionalRoutes,   setShowExceptionalRoutes]   = useState(false);
 
@@ -129,6 +135,24 @@ function App() {
     mapRef.current?.flyToPoint(lat, lng, 15);
   }, []);
 
+  // Wrapper qui injecte segmentDistances dans updateGroup
+  const handleUpdateGroup = useCallback((
+    groupId: string, patch: Partial<Group>,
+  ) => {
+    updateGroup(groupId, patch, segmentDistances);
+  }, [updateGroup, segmentDistances]);
+
+  // Déplacement d'un bloc de waypoints (groupe)
+  const handleMoveGroup = useCallback((
+    fromIndex: number, toIndex: number, count: number,
+  ) => {
+    const newWps = [...route.waypoints];
+    const moved = newWps.splice(fromIndex, count);
+    newWps.splice(toIndex, 0, ...moved);
+    setWaypoints(newWps);
+    rebaseGroups(route.waypoints, newWps);
+  }, [route.waypoints, setWaypoints, rebaseGroups]);
+
   useEffect(() => {
     if (!pendingFlyTo.current) return;
     if (route.routeGeometry && route.routeGeometry.length > 0) {
@@ -157,6 +181,39 @@ function App() {
     return h > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${m} min`;
   };
 
+  const formatDurationHours = (hours: number): string => {
+    const h = Math.floor(hours);
+    const m = Math.round((hours - h) * 60);
+    return h > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${m} min`;
+  };
+
+  // Stats cumulées globales (groupes + segments individuels)
+  const totalPlannedDuration = useMemo(() => {
+    let total = groupMetrics.reduce((sum, g) => sum + g.durationH, 0);
+    for (let i = 1; i < route.waypoints.length; i++) {
+      // Si ce segment est dans un groupe, déjà compté
+      const inGroup = groups.some(g => i > g.fromWpIndex && i <= g.toWpIndex);
+      if (inGroup) continue;
+
+      const distKm = segmentDistances?.[i] ?? 0;
+      if (distKm <= 0) continue;
+
+      const manual = manualSegmentDuration[i];
+      if (manual !== null && manual !== undefined) {
+        total += manual;
+      } else {
+        const speed = segmentSpeeds[i] ?? maxSpeed;
+        total += distKm / speed;
+      }
+    }
+    return total;
+  }, [groupMetrics, groups, segmentDistances, manualSegmentDuration, segmentSpeeds, maxSpeed, route.waypoints.length]);
+
+  const totalDistKm = parseFloat(distanceKm);
+  const avgSpeed = totalPlannedDuration > 0 && totalDistKm > 0
+    ? Math.round(totalDistKm / totalPlannedDuration * 10) / 10
+    : null;
+
   // ── Clic droit ───────────────────────────────────────────
   const handleContextMenuAction = (
     action: 'start' | 'end' | 'via' | 'via-direct',
@@ -182,14 +239,63 @@ function App() {
     importRoute(parsed.name, parsed.waypoints, parsed.geometry);
   };
 
-  // ── Vitesses par segment ─────────────────────────────────
+  // ── Vitesses et durées par segment ───────────────────────
   const handleSegmentSpeedChange = (index: number, speed: number) => {
     setSegmentSpeeds(prev => {
       const next = [...prev];
       next[index] = speed;
       return next;
     });
+    setManualSegmentDuration(prev => {
+      const next = [...prev];
+      next[index] = null;
+      return next;
+    });
   };
+
+  const handleSegmentDurationChange = (index: number, durationH: number) => {
+    setManualSegmentDuration(prev => {
+      const next = [...prev];
+      next[index] = durationH;
+      return next;
+    });
+    // Recalculer la vitesse (arrondie sans virgule)
+    const distKm = segmentDistances?.[index] ?? 0;
+    if (distKm > 0 && durationH > 0) {
+      const newSpeed = Math.round(distKm / durationH);
+      setSegmentSpeeds(prev => {
+        const next = [...prev];
+        next[index] = Math.max(1, newSpeed);
+        return next;
+      });
+    }
+  };
+
+  const handleSegmentPauseChange = (index: number, pauseH: number) => {
+    setSegmentPause(prev => {
+      const next = [...prev];
+      next[index] = pauseH;
+      return next;
+    });
+  };
+
+  const handleSegmentRemarkChange = (index: number, remark: string) => {
+    setSegmentRemark(prev => {
+      const next = [...prev];
+      next[index] = remark;
+      return next;
+    });
+  };
+
+  // Réinitialiser toutes les durées personnalisées
+  const handleResetAll = useCallback(() => {
+    resetAllDurations(maxSpeed);
+    setManualSegmentDuration([]);
+    setSegmentPause([]);
+    setSegmentRemark([]);
+    const speeds = route.waypoints.map((_, i) => i > 0 ? maxSpeed : 0);
+    setSegmentSpeeds(speeds);
+  }, [resetAllDurations, maxSpeed, route.waypoints.length]);
 
   // ── Insertion depuis lieux enregistrés ou recherche ──────
   // Callback unique, utilise getInsertIndex()
@@ -279,6 +385,30 @@ function App() {
               <span className="text-[10px] text-gray-500">km/h</span>
             </div>
           </div>
+          {/* Stats groupes : durée cumulée + vitesse moyenne */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1 bg-indigo-50 rounded px-1 py-1">
+              <span className="text-[10px] font-semibold text-indigo-600">
+                {formatDurationHours(totalPlannedDuration)}
+              </span>
+              <span className="text-[9px] text-gray-500">plan.</span>
+            </div>
+            {avgSpeed !== null && (
+              <div className="flex items-center gap-1 bg-teal-50 rounded px-1 py-1">
+                <span className="text-[10px] font-semibold text-teal-600">{avgSpeed}</span>
+                <span className="text-[9px] text-gray-500">km/h moy.</span>
+              </div>
+            )}
+            <button
+              onClick={handleResetAll}
+              className="ml-auto text-[9px] text-indigo-400 hover:text-indigo-600
+                         border border-dashed border-indigo-200 rounded px-1
+                         hover:bg-indigo-100 transition-colors"
+              title="Réinitialiser toutes les durées personnalisées"
+            >
+              ↺ Reset durées
+            </button>
+          </div>
         </div>
 
         {/* Contrôles calcul */}
@@ -326,10 +456,13 @@ function App() {
             segmentDistances={segmentDistances}
             segmentDurations={segmentDurations}
             segmentSpeeds={segmentSpeeds}
+            manualSegmentDuration={manualSegmentDuration}
             onSegmentSpeedChange={handleSegmentSpeedChange}
+            onSegmentDurationChange={handleSegmentDurationChange}
             onAddGroup={addGroup}
             onRemoveGroup={removeGroup}
-            onUpdateGroup={updateGroup}
+            onUpdateGroup={handleUpdateGroup}
+            onMoveGroup={handleMoveGroup}
             onExtendGroup={extendGroup}
             onToggleGroupExpanded={toggleGroupExpanded}
             onRemoveWaypointFromGroup={removeWaypointFromGroup}
@@ -639,6 +772,18 @@ function App() {
         <PlanningModal
           waypoints={route.waypoints}
           segmentDistances={segmentDistances}
+          groups={groupMetrics}
+          onUpdateGroup={handleUpdateGroup}
+          onRemoveGroup={removeGroup}
+          segmentSpeeds={segmentSpeeds}
+          manualSegmentDuration={manualSegmentDuration}
+          onSegmentSpeedChange={handleSegmentSpeedChange}
+          onSegmentDurationChange={handleSegmentDurationChange}
+          segmentPause={segmentPause}
+          segmentRemark={segmentRemark}
+          onSegmentPauseChange={handleSegmentPauseChange}
+          onSegmentRemarkChange={handleSegmentRemarkChange}
+          maxSpeed={maxSpeed}
           routeName={route.name}
           onClose={() => setShowPlanningModal(false)}
         />

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   DndContext,
-  closestCenter,
+  pointerWithin,
   PointerSensor,
   useSensor,
   useSensors,
@@ -22,6 +22,50 @@ import SavePlaceModal from './SavePlaceModal';
 
 const DEFAULT_SPEED = 60;
 
+/** Input durée avec affichage formaté dans la case + sélection auto au focus */
+function DurTextInput({ value, isManual, onChange, disabled }: {
+  value: number;
+  isManual: boolean;
+  onChange: (v: number) => void;
+  disabled?: boolean;
+}) {
+  const [focused, setFocused] = useState(false);
+  const [text, setText] = useState('');
+
+  const display = focused
+    ? text
+    : (value > 0 ? formatDurHours(value) : '');
+
+  return (
+    <input
+      type="text"
+      value={display}
+      onChange={e => setText(e.target.value)}
+      onFocus={e => {
+        if (disabled) return;
+        setFocused(true);
+        setText(value > 0 ? value.toFixed(2) : '');
+        e.target.select();
+      }}
+      onBlur={() => {
+        setFocused(false);
+        const v = parseFloat(text);
+        if (!isNaN(v) && v >= 0) onChange(Math.max(0, v));
+      }}
+      disabled={disabled}
+      className={`w-14 border rounded px-1 py-0 text-[10px] text-right
+        focus:outline-none focus:border-orange-400
+        ${isManual
+          ? 'border-orange-300 bg-orange-50 text-orange-600 font-semibold'
+          : 'border-orange-200 bg-orange-50 text-orange-500 font-semibold'}
+        ${disabled ? 'opacity-50' : ''}`}
+      title="Durée (heures)"
+    />
+  );
+}
+
+const selectOnFocus = (e: React.FocusEvent<HTMLInputElement>) => e.target.select();
+
 function wpLabel(wp: Waypoint | undefined, idx: number): string {
   if (!wp) return `Point ${idx + 1}`;
   if (wp.locality) return wp.locality;
@@ -35,9 +79,11 @@ function formatDur(seconds: number): string {
   return h > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${m} min`;
 }
 
-function durFromSpeed(distKm: number, speedKmh: number): string | null {
-  if (!distKm || distKm <= 0 || speedKmh <= 0) return null;
-  return formatDur((distKm / speedKmh) * 3600);
+function formatDurHours(hours: number): string {
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  if (h > 0) return `${h}h${m.toString().padStart(2, '0')}`;
+  return `${m} min`;
 }
 
 // ── Ligne de groupe (remplace les waypoints masqués) ───────────
@@ -55,14 +101,35 @@ interface GroupRowProps {
 const GroupRow = ({
   group, firstWpName, lastWpName, onRemove, onUpdate, onExtend, onToggleExpand, waypointCount,
 }: GroupRowProps) => {
+  const {
+    attributes, listeners, setNodeRef,
+    transform, transition, isDragging,
+  } = useSortable({ id: group.id });
+
   const isManual = group.manualDurationH !== null;
   const hasNext = group.toWpIndex < waypointCount - 1;
 
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 50 : 'auto' as const,
+  };
+
   return (
-    <li className="px-2 py-0.5 select-none">
+    <li ref={setNodeRef} style={style} className="px-2 py-0.5 select-none">
       <div className="bg-indigo-50 border border-indigo-200 rounded-lg overflow-hidden">
         {/* 1e ligne : X–Y, nom, expand, dissoudre */}
         <div className="flex items-center gap-1.5 px-2 py-1">
+          <button
+            {...attributes}
+            {...listeners}
+            className="text-indigo-300 hover:text-indigo-500 cursor-grab active:cursor-grabbing text-base leading-none flex-shrink-0"
+            title="Déplacer le groupe"
+          >
+            ⠿
+          </button>
+
           <button
             onClick={() => onToggleExpand(group.id)}
             className="text-indigo-400 hover:text-indigo-600 text-sm font-bold w-6 text-center flex-shrink-0 leading-none"
@@ -98,53 +165,61 @@ const GroupRow = ({
               {formatDur(group.durationH * 3600)}
             </span>
           )}
-          {durFromSpeed(group.distKm, group.speedKmh) && (
-            <span className="text-[10px] font-semibold text-orange-500 bg-orange-50
-                             border border-orange-200 rounded px-1">
-              {durFromSpeed(group.distKm, group.speedKmh)}
-            </span>
-          )}
 
-          <input
-            type="number"
-            min={0}
-            step={0.25}
-            value={isManual ? group.manualDurationH! : group.durationH}
-            onChange={e => onUpdate(group.id, {
-              manualDurationH: Math.max(0, Number(e.target.value)),
-            })}
-            className={`w-14 border rounded px-1 py-0 text-[10px] text-right
-              focus:outline-none focus:border-indigo-400
-              ${isManual ? 'border-indigo-300 bg-white' : 'border-gray-200 bg-transparent'}`}
-            title="Durée (heures)"
-          />
-          <span className="text-[9px] text-gray-400">h</span>
+          {(() => {
+            const displayH = isManual ? group.manualDurationH! : group.durationH;
+            return (
+              <>
+                <DurTextInput
+                  value={displayH}
+                  isManual={isManual}
+                  onChange={v => onUpdate(group.id, { manualDurationH: v })}
+                />
+                <span className="text-[9px] text-gray-400">h</span>
+              </>
+            );
+          })()}
 
           <input
             type="number"
             min={1}
             max={300}
-            value={group.speedKmh}
+            step={1}
+            value={Math.round(group.speedKmh)}
             onChange={e => onUpdate(group.id, {
-              speedKmh: Math.max(1, Number(e.target.value)),
+              speedKmh: Math.max(1, Math.round(Number(e.target.value))),
             })}
+            onFocus={selectOnFocus}
             className="w-10 border border-gray-300 rounded px-1 py-0 text-[10px] text-center
               focus:outline-none focus:border-orange-400"
             title="Vitesse (km/h)"
           />
           <span className="text-[9px] text-gray-400">km/h</span>
 
-          {hasNext && (
-            <button
-              onClick={() => onExtend(group.id, group.toWpIndex + 1)}
-              className="ml-auto text-[9px] text-indigo-400 hover:text-indigo-600
-                         border border-dashed border-indigo-200 rounded px-1
-                         hover:bg-indigo-100 transition-colors"
-              title="Étendre au waypoint suivant"
-            >
-              + étendre
-            </button>
-          )}
+          <div className="ml-auto flex gap-1">
+            {group.fromWpIndex > 0 && (
+              <button
+                onClick={() => onExtend(group.id, group.fromWpIndex - 1)}
+                className="text-[9px] text-indigo-400 hover:text-indigo-600
+                           border border-dashed border-indigo-200 rounded px-1
+                           hover:bg-indigo-100 transition-colors"
+                title="Étendre au waypoint précédent"
+              >
+                ← étendre
+              </button>
+            )}
+            {hasNext && (
+              <button
+                onClick={() => onExtend(group.id, group.toWpIndex + 1)}
+                className="text-[9px] text-indigo-400 hover:text-indigo-600
+                           border border-dashed border-indigo-200 rounded px-1
+                           hover:bg-indigo-100 transition-colors"
+                title="Étendre au waypoint suivant"
+              >
+                étendre →
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </li>
@@ -206,7 +281,9 @@ interface SortableItemProps {
   distFromPrev?: number;
   durFromPrev?: number;
   segSpeed?: number;
+  segDurationManual?: number | null;
   onSpeedChange?: (speed: number) => void;
+  onDurationChange?: (durationH: number) => void;
   isInGroup?: boolean;
   showSegmentConnector?: boolean;
   isGroupBoundary?: boolean;
@@ -219,7 +296,7 @@ interface SortableItemProps {
 
 const SortableItem = ({
   waypoint, index, total, onRemove, onUpdatePosition, onSavePlace,
-  distFromPrev, durFromPrev, segSpeed, onSpeedChange, isInGroup,
+  distFromPrev, durFromPrev, segSpeed, segDurationManual, onSpeedChange, onDurationChange, isInGroup,
   showSegmentConnector, isGroupBoundary, onRemoveFromGroup, onAddGroup,
   onWaypointClick, compact, savedPlaceName,
 }: SortableItemProps) => {
@@ -267,23 +344,38 @@ const SortableItem = ({
               )}
               {distFromPrev !== undefined && distFromPrev > 0 && (
                 <>
-                  <span className={`text-[10px] font-semibold border rounded px-1
-                    ${isInGroup ? 'text-gray-400 border-gray-200 bg-gray-50' : 'text-orange-500 bg-orange-50 border-orange-200'}`}>
-                    {durFromSpeed(distFromPrev!, segSpeed ?? DEFAULT_SPEED)}
-                  </span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={300}
-                    value={segSpeed ?? DEFAULT_SPEED}
-                    onChange={e => onSpeedChange?.(Math.max(1, Number(e.target.value)))}
-                    className={`w-10 border rounded px-1 py-0 text-[10px] text-center
-                      focus:outline-none focus:border-orange-400 bg-white
-                      ${isInGroup ? 'border-gray-200 opacity-50' : 'border-gray-300'}`}
-                    title="Vitesse max pour ce segment (km/h)"
-                    disabled={isInGroup}
-                  />
-                  <span className="text-[9px] text-gray-400">km/h</span>
+                  {(() => {
+                    const speed = segSpeed ?? DEFAULT_SPEED;
+                    const computedH = distFromPrev! / speed;
+                    const manualVal = segDurationManual;
+                    const displayH = manualVal !== null && manualVal !== undefined ? manualVal : computedH;
+                    return (
+                      <>
+                        <DurTextInput
+                          value={displayH}
+                          isManual={manualVal !== null && manualVal !== undefined}
+                          onChange={v => onDurationChange?.(v)}
+                          disabled={isInGroup}
+                        />
+                        <span className="text-[9px] text-gray-400">h</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={300}
+                          step={1}
+                          value={Math.round(speed)}
+                          onChange={e => onSpeedChange?.(Math.max(1, Math.round(Number(e.target.value))))}
+                          onFocus={selectOnFocus}
+                          className={`w-10 border rounded px-1 py-0 text-[10px] text-center
+                            focus:outline-none focus:border-orange-400 bg-white
+                            ${isInGroup ? 'border-gray-200 opacity-50' : 'border-gray-300'}`}
+                          title="Vitesse max pour ce segment (km/h)"
+                          disabled={isInGroup}
+                        />
+                        <span className="text-[9px] text-gray-400">km/h</span>
+                      </>
+                    );
+                  })()}
                 </>
               )}
               {/* Bouton créer groupe */}
@@ -447,7 +539,9 @@ interface WaypointListProps {
   segmentDistances?: number[];
   segmentDurations?: number[];
   segmentSpeeds?: number[];
+  manualSegmentDuration?: (number | null)[];
   onSegmentSpeedChange?: (index: number, speed: number) => void;
+  onSegmentDurationChange?: (index: number, durationH: number) => void;
   onAddGroup: (fromWpIndex: number, toWpIndex: number) => void;
   onRemoveGroup: (groupId: string) => void;
   onUpdateGroup: (groupId: string, patch: Partial<Group>) => void;
@@ -455,6 +549,7 @@ interface WaypointListProps {
   onToggleGroupExpanded: (groupId: string) => void;
   onRemoveWaypointFromGroup: (groupId: string, wpIndex: number) => void;
   onWaypointClick?: (lat: number, lng: number) => void;
+  onMoveGroup?: (fromIndex: number, toIndex: number, count: number) => void;
   compact?: boolean;
 }
 
@@ -469,7 +564,9 @@ const WaypointList = ({
   segmentDistances,
   segmentDurations,
   segmentSpeeds,
+  manualSegmentDuration,
   onSegmentSpeedChange,
+  onSegmentDurationChange,
   onAddGroup,
   onRemoveGroup,
   onUpdateGroup,
@@ -477,10 +574,11 @@ const WaypointList = ({
   onToggleGroupExpanded,
   onRemoveWaypointFromGroup,
   onWaypointClick,
+  onMoveGroup,
   compact,
 }: WaypointListProps) => {
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
 
   const [savingWaypoint, setSavingWaypoint] = useState<Waypoint | null>(null);
@@ -499,11 +597,45 @@ const WaypointList = ({
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const fromIndex = waypoints.findIndex(wp => wp.id === active.id);
-    const toIndex   = waypoints.findIndex(wp => wp.id === over.id);
-    if (fromIndex !== -1 && toIndex !== -1) {
-      onReorder(fromIndex, toIndex);
+
+    // Groupe déplacé ?
+    const activeGroup = groups.find(g => g.id === active.id);
+    if (activeGroup) {
+      const fromIndex = activeGroup.fromWpIndex;
+      const count = activeGroup.toWpIndex - activeGroup.fromWpIndex + 1;
+
+      let toIndex: number;
+      const overGroup = groups.find(g => g.id === over.id);
+      if (overGroup) {
+        toIndex = overGroup.fromWpIndex;
+      } else {
+        const idx = waypoints.findIndex(wp => wp.id === over.id);
+        if (idx === -1) return;
+        toIndex = idx;
+      }
+
+      if (toIndex > fromIndex) {
+        toIndex = toIndex - count + 1;
+      }
+
+      onMoveGroup?.(fromIndex, toIndex, count);
+      return;
     }
+
+    // Waypoint déplacé
+    const fromIndex = waypoints.findIndex(wp => wp.id === active.id);
+    if (fromIndex === -1) return;
+
+    let toIndex: number;
+    const overGroup = groups.find(g => g.id === over.id);
+    if (overGroup) {
+      toIndex = overGroup.fromWpIndex;
+    } else {
+      toIndex = waypoints.findIndex(wp => wp.id === over.id);
+    }
+    if (toIndex === -1) return;
+
+    onReorder(fromIndex, toIndex);
   };
 
   // Calcule les waypoints masqués par les groupes repliés (y compris le 1er)
@@ -516,10 +648,17 @@ const WaypointList = ({
     }
   }
 
-  // Liste des sortables (exclut les waypoints groupés repliés)
-  const sortableItems = waypoints
-    .filter((_, i) => !hiddenIndices.has(i))
-    .map(wp => wp.id);
+  // Liste des sortables (inclut les groupes + waypoints visibles)
+  const sortableItems: string[] = [];
+  for (let i = 0; i < waypoints.length; i++) {
+    if (hiddenIndices.has(i)) continue;
+    const group = groups.find(g => g.fromWpIndex === i);
+    if (group) {
+      sortableItems.push(group.id);
+      continue;
+    }
+    sortableItems.push(waypoints[i].id);
+  }
 
   // Détermine si un waypoint est à l'intérieur d'un groupe (même si déplié)
   function isInsideGroup(idx: number): boolean {
@@ -545,6 +684,11 @@ const WaypointList = ({
         if (i > 0) {
           const segDist = segmentDistances?.[i];
           const segDur  = segmentDurations?.[i];
+          const segSpeed = segmentSpeeds?.[i];
+          const segManual = manualSegmentDuration?.[i] ?? null;
+          const speed = segSpeed ?? DEFAULT_SPEED;
+          const computedH = segDist ? (segDist / speed) : 0;
+          const displayH = segManual !== null ? segManual : computedH;
           items.push(
             <li key={`seg-before-${i}`} className="flex items-start gap-1 px-2 select-none py-0.5">
               <span className="w-5 flex-shrink-0" />
@@ -563,6 +707,29 @@ const WaypointList = ({
                     </span>
                   ) : (
                     <span className="text-[10px] text-gray-300 italic">— (OSRM)</span>
+                  )}
+                  {segDist !== undefined && segDist > 0 && (
+                    <>
+                      <DurTextInput
+                        value={displayH}
+                        isManual={segManual !== null}
+                        onChange={v => onSegmentDurationChange?.(i, v)}
+                      />
+                      <span className="text-[9px] text-gray-400">h</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={300}
+                        step={1}
+                        value={Math.round(speed)}
+                        onChange={e => onSegmentSpeedChange?.(i, Math.max(1, Math.round(Number(e.target.value))))}
+                        onFocus={selectOnFocus}
+                        className="w-10 border border-gray-300 rounded px-1 py-0 text-[10px] text-center
+                          focus:outline-none focus:border-orange-400 bg-white"
+                        title="Vitesse max pour ce segment (km/h)"
+                      />
+                      <span className="text-[9px] text-gray-400">km/h</span>
+                    </>
                   )}
                 </div>
               </div>
@@ -634,7 +801,9 @@ const WaypointList = ({
           distFromPrev={segDist}
           durFromPrev={segDur}
           segSpeed={segSpeed}
+          segDurationManual={manualSegmentDuration?.[i] ?? null}
           onSpeedChange={s => onSegmentSpeedChange?.(i, s)}
+          onDurationChange={s => onSegmentDurationChange?.(i, s)}
           isInGroup={isInGroup}
           showSegmentConnector={i > 0}
           isGroupBoundary={isInGroup && (isGroupFirst || isGroupLast) && (groupContaining?.expanded ?? false)}
@@ -658,7 +827,7 @@ const WaypointList = ({
   const hasEnd   = waypoints.length > 1;
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragEnd={handleDragEnd}>
       <SortableContext items={sortableItems} strategy={verticalListSortingStrategy}>
         <ul className="space-y-0">
 

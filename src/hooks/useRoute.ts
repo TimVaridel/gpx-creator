@@ -219,6 +219,12 @@ export const useRoute = () => {
     setSegmentDurations([]);
   }, []);
 
+  const setWaypoints = useCallback((newWps: Waypoint[]) => {
+    setRoute(prev => ({ ...prev, waypoints: newWps }));
+    setSegmentDistances([]);
+    setSegmentDurations([]);
+  }, []);
+
   const renameRoute = useCallback((name: string) => {
     setRoute(prev => ({ ...prev, name }));
   }, []);
@@ -304,6 +310,7 @@ export const useRoute = () => {
     removeWaypoint,
     updateWaypointPosition,
     moveWaypoint,
+    setWaypoints,
     renameRoute,
     clearRoute,
     clearGeometry,

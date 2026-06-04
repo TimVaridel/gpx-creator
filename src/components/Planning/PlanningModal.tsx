@@ -1,27 +1,27 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import ExcelJS from 'exceljs';
-import type { Waypoint } from '../../types/route.types';
+import type { Waypoint, Group } from '../../types/route.types';
 
 // ── Types ────────────────────────────────────────────────────
-interface PlanningRow {
-  id:             string;
-  fromWpIndex:    number;
-  toWpIndex:      number;
-  durationH:      number;
-  durationManual: boolean;
-  speedKmh:       number;
-  pauseH:         number;
-  remark:         string;
-}
-
 interface PlanningModalProps {
-  waypoints:        Waypoint[];
-  segmentDistances: number[];
-  routeName:        string;
-  onClose:          () => void;
+  waypoints:                Waypoint[];
+  segmentDistances:         number[];
+  groups:                   (Group & { distKm: number; durationH: number })[];
+  onUpdateGroup:            (groupId: string, patch: Partial<Group>) => void;
+  onRemoveGroup:            (groupId: string) => void;
+  segmentSpeeds:            number[];
+  manualSegmentDuration:    (number | null)[];
+  onSegmentSpeedChange:     (index: number, speed: number) => void;
+  onSegmentDurationChange:  (index: number, durationH: number) => void;
+  segmentPause:             number[];
+  segmentRemark:            string[];
+  onSegmentPauseChange:     (index: number, pauseH: number) => void;
+  onSegmentRemarkChange:    (index: number, remark: string) => void;
+  maxSpeed:                 number;
+  routeName:                string;
+  onClose:                  () => void;
 }
 
-const STORAGE_KEY          = 'gpx-planning-rows';
 const STORAGE_KEY_SETTINGS = 'gpx-planning-settings';
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -37,29 +37,6 @@ function routingDistanceKm(
   return total;
 }
 
-function addHoursToDateTime(
-  dateStr: string,
-  timeStr: string,
-  hours: number,
-): { date: string; time: string } {
-  const [h, m]     = timeStr.split(':').map(Number);
-  const [y, mo, d] = dateStr.split('-').map(Number);
-  const totalMin   = h * 60 + m + Math.round(hours * 60);
-  const extraDays  = Math.floor(totalMin / (60 * 24));
-  const hh = Math.floor(totalMin / 60) % 24;
-  const mm = totalMin % 60;
-  const dateObj = new Date(y, mo - 1, d + extraDays);
-  const newDate = [
-    dateObj.getFullYear(),
-    String(dateObj.getMonth() + 1).padStart(2, '0'),
-    String(dateObj.getDate()).padStart(2, '0'),
-  ].join('-');
-  return {
-    date: newDate,
-    time: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`,
-  };
-}
-
 function formatDateTimeCH(dateStr: string, timeStr: string): string {
   if (!dateStr) return timeStr;
   const [y, m, d] = dateStr.split('-');
@@ -73,23 +50,21 @@ function wpLabel(wp: Waypoint | undefined, idx: number): string {
   return `Point ${idx + 1}`;
 }
 
-function newRow(
-  segmentDistances: number[],
-  fromIdx: number,
-  toIdx: number,
-): PlanningRow {
-  const dist      = routingDistanceKm(segmentDistances, fromIdx, toIdx);
-  const speedKmh  = 60;
-  const durationH = dist > 0 ? Math.round((dist / speedKmh) * 100) / 100 : 0;
+function addHoursToDateTime(
+  dateStr: string,
+  timeStr: string,
+  hours: number,
+): { date: string; time: string } {
+  const [h, m]     = timeStr.split(':').map(Number);
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  const totalMin   = h * 60 + m + Math.round(hours * 60);
+  const extraDays  = Math.floor(totalMin / (60 * 24));
+  const hh = Math.floor(totalMin / 60) % 24;
+  const mm = totalMin % 60;
+  const dateObj = new Date(y, mo - 1, d + extraDays);
   return {
-    id:             crypto.randomUUID(),
-    fromWpIndex:    fromIdx,
-    toWpIndex:      toIdx,
-    durationH,
-    durationManual: false,
-    speedKmh,
-    pauseH:         0,
-    remark:         '',
+    date: `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`,
+    time: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`,
   };
 }
 
@@ -97,6 +72,18 @@ function newRow(
 const PlanningModal = ({
   waypoints,
   segmentDistances,
+  groups,
+  onUpdateGroup,
+  onRemoveGroup,
+  segmentSpeeds,
+  manualSegmentDuration,
+  onSegmentSpeedChange,
+  onSegmentDurationChange,
+  segmentPause,
+  segmentRemark,
+  onSegmentPauseChange,
+  onSegmentRemarkChange,
+  maxSpeed,
   routeName,
   onClose,
 }: PlanningModalProps) => {
@@ -113,27 +100,7 @@ const PlanningModal = ({
     catch { return '07:00'; }
   });
 
-  const [rows, setRows] = useState<PlanningRow[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (!saved) return [];
-      return (JSON.parse(saved) as PlanningRow[]).map(r => ({
-        ...r,
-        remark: r.remark ?? '',
-      }));
-    } catch { return []; }
-  });
-
-  // ── Fermeture au clic sur le backdrop ────────────────────
-  const handleBackdropClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.target === backdropRef.current) onClose();
-  }, [onClose]);
-
-  // ── Persistance ──────────────────────────────────────────
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
-  }, [rows]);
-
+  // ── Persistance des paramètres ──────────────────────────
   useEffect(() => {
     localStorage.setItem(
       STORAGE_KEY_SETTINGS,
@@ -141,111 +108,113 @@ const PlanningModal = ({
     );
   }, [globalDate, globalStart]);
 
-  // ── Adaptation si waypoints changent ─────────────────────
-  useEffect(() => {
-    const maxIdx = waypoints.length - 1;
-    setRows(prev =>
-      prev
-        .filter(r => r.fromWpIndex <= maxIdx && r.toWpIndex <= maxIdx)
-        .map(r => {
-          const dist      = routingDistanceKm(segmentDistances, r.fromWpIndex, r.toWpIndex);
-          const durationH = r.durationManual
-            ? r.durationH
-            : dist > 0 ? Math.round((dist / r.speedKmh) * 100) / 100 : 0;
-          return { ...r, durationH };
-        }),
-    );
-  }, [waypoints.length, segmentDistances]);
+  // ── Calcul des lignes d'affichage ──────────────────────
+  // Itération par segment : pour chaque segment segIdx entre waypoint[segIdx-1] et waypoint[segIdx] :
+  //   si un groupe commence à segIdx-1 → afficher le groupe fusionné
+  //   si le segment est dans un groupe → skip
+  //   sinon → ligne individuelle
+  interface DisplayRow {
+    type: 'group' | 'segment';
+    groupId?: string;
+    fromIndex: number;
+    toIndex: number;
+    fromWp: Waypoint;
+    toWp: Waypoint;
+    distKm: number;
+    durationH: number;
+    speedKmh: number;
+    isManual: boolean;
+    pauseH: number;
+    remark: string;
+    beginDate: string;
+    beginTime: string;
+    endDate: string;
+    endTime: string;
+  }
 
-  // ── Calcul des horaires ───────────────────────────────────
-  const computedTimes = useCallback(() => {
-    const times: {
-      beginDate: string; beginTime: string;
-      endDate:   string; endTime:   string;
-    }[] = [];
-    let curDate = globalDate;
-    let curTime = globalStart;
-    for (const row of rows) {
-      const beginDate = curDate;
-      const beginTime = curTime;
-      const endDt = addHoursToDateTime(beginDate, beginTime, row.durationH);
-      times.push({ beginDate, beginTime, endDate: endDt.date, endTime: endDt.time });
-      const nextDt = addHoursToDateTime(endDt.date, endDt.time, row.pauseH);
-      curDate = nextDt.date;
-      curTime = nextDt.time;
+  const displayRows: DisplayRow[] = [];
+  let curDate = globalDate;
+  let curTime = globalStart;
+
+  for (let segIdx = 1; segIdx < waypoints.length; ) {
+    // Vérifier si un groupe commence à segIdx-1 (le waypoint de départ du segment)
+    const group = groups.find(g => g.fromWpIndex === segIdx - 1);
+    if (group) {
+      const distKm = routingDistanceKm(segmentDistances, group.fromWpIndex, group.toWpIndex);
+      const durationH = group.manualDurationH ?? group.durationH;
+      const end = addHoursToDateTime(curDate, curTime, durationH);
+
+      displayRows.push({
+        type: 'group',
+        groupId: group.id,
+        fromIndex: group.fromWpIndex,
+        toIndex: group.toWpIndex,
+        fromWp: waypoints[group.fromWpIndex],
+        toWp: waypoints[group.toWpIndex],
+        distKm,
+        durationH,
+        speedKmh: group.speedKmh,
+        isManual: group.manualDurationH !== null,
+        pauseH: group.pauseH,
+        remark: group.remark,
+        beginDate: curDate,
+        beginTime: curTime,
+        endDate: end.date,
+        endTime: end.time,
+      });
+
+      const afterPause = addHoursToDateTime(end.date, end.time, group.pauseH);
+      curDate = afterPause.date;
+      curTime = afterPause.time;
+
+      segIdx = group.toWpIndex + 1; // skip les segments du groupe
+      continue;
     }
-    return times;
-  }, [rows, globalDate, globalStart]);
 
-  const times = computedTimes();
+    // Segment individuel (hors groupe)
+    const distKm = segmentDistances[segIdx] ?? 0;
+    const segSpeed = segmentSpeeds[segIdx] ?? maxSpeed;
+    const segManual = manualSegmentDuration[segIdx];
+    const durationH = segManual ?? (distKm > 0 ? Math.round((distKm / segSpeed) * 100) / 100 : 0);
+    const pauseH = segmentPause[segIdx] ?? 0;
+    const remark = segmentRemark[segIdx] ?? '';
+    const end = addHoursToDateTime(curDate, curTime, durationH);
 
-  // ── Handlers ─────────────────────────────────────────────
-  const addRow = () => {
-    const lastTo = rows.length > 0 ? rows[rows.length - 1].toWpIndex : 0;
-    const nextTo = Math.min(lastTo + 1, waypoints.length - 1);
-    if (lastTo === nextTo && rows.length > 0) return;
-    setRows(prev => [...prev, newRow(segmentDistances, lastTo, nextTo)]);
-  };
+    displayRows.push({
+      type: 'segment',
+      fromIndex: segIdx - 1,
+      toIndex: segIdx,
+      fromWp: waypoints[segIdx - 1],
+      toWp: waypoints[segIdx],
+      distKm,
+      durationH,
+      speedKmh: segSpeed,
+      isManual: segManual !== null && segManual !== undefined,
+      pauseH,
+      remark,
+      beginDate: curDate,
+      beginTime: curTime,
+      endDate: end.date,
+      endTime: end.time,
+    });
 
-  const removeRow = (id: string) =>
-    setRows(prev => prev.filter(r => r.id !== id));
+    const afterPause = addHoursToDateTime(end.date, end.time, pauseH);
+    curDate = afterPause.date;
+    curTime = afterPause.time;
 
-  const updateRow = (id: string, patch: Partial<PlanningRow>) => {
-    setRows(prev =>
-      prev.map(r => {
-        if (r.id !== id) return r;
-        const updated = { ...r, ...patch };
+    segIdx++;
+  }
 
-        if (
-          ('fromWpIndex' in patch || 'toWpIndex' in patch || 'speedKmh' in patch) &&
-          !updated.durationManual
-        ) {
-          const dist = routingDistanceKm(
-            segmentDistances,
-            updated.fromWpIndex,
-            updated.toWpIndex,
-          );
-          updated.durationH = dist > 0
-            ? Math.round((dist / updated.speedKmh) * 100) / 100
-            : 0;
-        }
+  // ── Fermeture au clic sur le backdrop ──────────────────
+  const handleBackdropClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === backdropRef.current) onClose();
+  }, [onClose]);
 
-        if ('durationH' in patch) {
-          updated.durationManual = true;
-          const dist = routingDistanceKm(
-            segmentDistances,
-            updated.fromWpIndex,
-            updated.toWpIndex,
-          );
-          updated.speedKmh = updated.durationH > 0 && dist > 0
-            ? Math.round((dist / updated.durationH) * 10) / 10
-            : updated.speedKmh;
-        }
-
-        return updated;
-      }),
-    );
-  };
-
-  const resetDuration = (id: string) => {
-    setRows(prev =>
-      prev.map(r => {
-        if (r.id !== id) return r;
-        const dist      = routingDistanceKm(segmentDistances, r.fromWpIndex, r.toWpIndex);
-        const durationH = dist > 0 ? Math.round((dist / r.speedKmh) * 100) / 100 : 0;
-        return { ...r, durationManual: false, durationH };
-      }),
-    );
-  };
-
-  // ── Export Excel ──────────────────────────────────────────
+  // ── Export Excel ────────────────────────────────────────
   const exportExcel = async () => {
-    const t = computedTimes();
-
     const workbook  = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Planning');
 
-    // Colonnes
     worksheet.columns = [
       { header: 'De',             key: 'de',       width: 24 },
       { header: 'À',              key: 'a',        width: 24 },
@@ -258,7 +227,6 @@ const PlanningModal = ({
       { header: 'Remarque',       key: 'remarque', width: 32 },
     ];
 
-    // Style de l'en-tête
     worksheet.getRow(1).eachCell(cell => {
       cell.font      = { bold: true, color: { argb: 'FFFFFFFF' } };
       cell.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F46E5' } };
@@ -268,39 +236,30 @@ const PlanningModal = ({
       };
     });
 
-    // Lignes de données
-    rows.forEach((row, i) => {
-      const fromWp = waypoints[row.fromWpIndex];
-      const toWp   = waypoints[row.toWpIndex];
-      const dist   = routingDistanceKm(segmentDistances, row.fromWpIndex, row.toWpIndex);
-      const ti     = t[i];
-
+    displayRows.forEach((row) => {
       const excelRow = worksheet.addRow({
-        de:       wpLabel(fromWp, row.fromWpIndex),
-        a:        wpLabel(toWp,   row.toWpIndex),
-        km:       Math.round(dist * 10) / 10,
+        de:       wpLabel(row.fromWp, row.fromIndex),
+        a:        wpLabel(row.toWp, row.toIndex),
+        km:       Math.round(row.distKm * 10) / 10,
         duree:    row.durationH,
         vitesse:  row.speedKmh,
-        debut:    formatDateTimeCH(ti.beginDate, ti.beginTime),
-        fin:      formatDateTimeCH(ti.endDate,   ti.endTime),
+        debut:    formatDateTimeCH(row.beginDate, row.beginTime),
+        fin:      formatDateTimeCH(row.endDate, row.endTime),
         pause:    row.pauseH,
         remarque: row.remark,
       });
 
-      // Alternance de couleur de fond
-      if (i % 2 === 0) {
+      if (row.type === 'group') {
         excelRow.eachCell(cell => {
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5FF' } };
         });
       }
 
-      // Alignement des colonnes numériques
       ['km', 'duree', 'vitesse', 'pause'].forEach(key => {
         excelRow.getCell(key).alignment = { horizontal: 'right' };
       });
     });
 
-    // Génération et téléchargement
     const buffer   = await workbook.xlsx.writeBuffer();
     const blob     = new Blob([buffer], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -314,6 +273,40 @@ const PlanningModal = ({
     URL.revokeObjectURL(url);
   };
 
+  // ── Composant durée éditable avec affichage formaté ────
+  function DurInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+    const [focused, setFocused] = useState(false);
+    const [text, setText] = useState('');
+
+    const display = focused
+      ? text
+      : (value > 0 ? (() => {
+          const h = Math.floor(value);
+          const m = Math.round((value - h) * 60);
+          return h > 0 ? `${h}h${m.toString().padStart(2, '0')}` : `${m} min`;
+        })() : '');
+
+    return (
+      <input
+        type="text"
+        value={display}
+        onChange={e => setText(e.target.value)}
+        onFocus={e => {
+          setFocused(true);
+          setText(value > 0 ? value.toFixed(2) : '');
+          e.target.select();
+        }}
+        onBlur={() => {
+          setFocused(false);
+          const v = parseFloat(text);
+          if (!isNaN(v) && v >= 0) onChange(v);
+        }}
+        className="border rounded px-1 py-0.5 text-xs text-right w-16
+                   focus:border-orange-400 focus:outline-none
+                   border-orange-200 bg-orange-50"
+      />
+    );
+  }
 
   // ── Render ────────────────────────────────────────────────
   const hasRoutingDist = segmentDistances.some(d => d > 0);
@@ -371,10 +364,10 @@ const PlanningModal = ({
 
         {/* Tableau */}
         <div className="flex-1 overflow-auto px-6 py-4">
-          {rows.length === 0 ? (
+          {displayRows.length === 0 ? (
             <div className="text-center text-gray-400 py-16">
               <p className="text-4xl mb-3">🗓️</p>
-              <p className="text-sm">Aucune étape. Cliquez sur « + Ajouter une étape ».</p>
+              <p className="text-sm">Ajoutez des waypoints pour commencer.</p>
             </div>
           ) : (
             <table className="w-full text-sm border-collapse">
@@ -386,7 +379,7 @@ const PlanningModal = ({
                   <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500">km</th>
                   <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500">Durée [h]</th>
                   <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500">Vitesse [km/h]</th>
-                  <th className="px-2 py-2 text-left  text-xs font-semibold text-gray-500">Date début</th>
+                  <th className="px-2 py-2 text-left  text-xs font-semibold text-gray-500">Début</th>
                   <th className="px-2 py-2 text-left  text-xs font-semibold text-gray-500">Fin</th>
                   <th className="px-2 py-2 text-right text-xs font-semibold text-gray-500">Pause [h]</th>
                   <th className="px-2 py-2 text-left  text-xs font-semibold text-gray-500">Remarque</th>
@@ -394,146 +387,151 @@ const PlanningModal = ({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, i) => {
-                  const fromWp = waypoints[row.fromWpIndex];
-                  const toWp   = waypoints[row.toWpIndex];
-                  const dist   = routingDistanceKm(
-                    segmentDistances,
-                    row.fromWpIndex,
-                    row.toWpIndex,
-                  );
-                  const ti = times[i];
+                {displayRows.map((row, idx) => (
+                  <tr key={`${row.type}-${row.fromIndex}-${idx}`}
+                      className={`border-b border-gray-100 hover:bg-gray-50 ${
+                        row.type === 'group' ? 'bg-indigo-50/30' : ''
+                      }`}>
 
-                  return (
-                    <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50">
-
-                      {/* # */}
-                      <td className="px-2 py-2 text-xs text-gray-400 font-medium">{i + 1}</td>
-
-                      {/* De */}
-                      <td className="px-2 py-2">
-                        <div className="flex flex-col gap-0.5">
-                          <select
-                            value={row.fromWpIndex}
-                            onChange={e => updateRow(row.id, { fromWpIndex: Number(e.target.value) })}
-                            className="border border-gray-200 rounded px-1 py-0.5 text-xs w-14"
-                          >
-                            {waypoints.map((_, idx) => (
-                              <option key={idx} value={idx}>{idx + 1}</option>
-                            ))}
-                          </select>
-                          <span className="text-[10px] text-gray-400 truncate max-w-[120px]">
-                            {wpLabel(fromWp, row.fromWpIndex)}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* À */}
-                      <td className="px-2 py-2">
-                        <div className="flex flex-col gap-0.5">
-                          <select
-                            value={row.toWpIndex}
-                            onChange={e => updateRow(row.id, { toWpIndex: Number(e.target.value) })}
-                            className="border border-gray-200 rounded px-1 py-0.5 text-xs w-14"
-                          >
-                            {waypoints.map((_, idx) => (
-                              <option key={idx} value={idx}>{idx + 1}</option>
-                            ))}
-                          </select>
-                          <span className="text-[10px] text-gray-400 truncate max-w-[120px]">
-                            {wpLabel(toWp, row.toWpIndex)}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* km */}
-                      <td className="px-2 py-2 text-right font-medium text-gray-700 text-xs">
-                        {dist > 0 ? dist.toFixed(1) : <span className="text-gray-300">—</span>}
-                      </td>
-
-                      {/* Durée */}
-                      <td className="px-2 py-2 text-right">
-                        <div className="flex items-center gap-1 justify-end">
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.25"
-                            value={row.durationH}
-                            onChange={e => updateRow(row.id, { durationH: Number(e.target.value) })}
-                            className={`border rounded px-1 py-0.5 text-xs text-right w-16
-                              focus:border-indigo-400 focus:outline-none
-                              ${row.durationManual
-                                ? 'border-indigo-300 bg-indigo-50'
-                                : 'border-gray-200'}`}
-                          />
-                          {row.durationManual && (
-                            <button
-                              onClick={() => resetDuration(row.id)}
-                              title="Recalculer automatiquement"
-                              className="text-gray-300 hover:text-indigo-500 text-xs"
-                            >
-                              ↺
-                            </button>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Vitesse — lecture seule */}
-                      <td className="px-2 py-2 text-right">
-                        <span className="text-xs text-gray-600 font-medium">
-                          {row.speedKmh > 0 ? row.speedKmh.toFixed(1) : '—'}
+                    {/* # */}
+                    <td className={`px-2 py-2 text-xs font-medium ${
+                      row.type === 'group' ? 'text-indigo-600' : 'text-gray-400'
+                    }`}>
+                      {row.type === 'group' ? (
+                        <span className="bg-indigo-100 text-indigo-700 rounded px-1.5 py-0.5 text-[10px] font-bold">
+                          G{row.fromIndex + 1}–{row.toIndex + 1}
                         </span>
-                      </td>
+                      ) : (
+                        idx + 1
+                      )}
+                    </td>
 
-                      {/* Date début */}
-                      <td className="px-2 py-2 text-xs text-gray-600 whitespace-nowrap">
-                        {formatDateTimeCH(ti.beginDate, ti.beginTime)}
-                      </td>
+                    {/* De */}
+                    <td className="px-2 py-2">
+                      <span className="text-xs text-gray-700">{wpLabel(row.fromWp, row.fromIndex)}</span>
+                    </td>
 
-                      {/* Fin */}
-                      <td className="px-2 py-2 text-xs text-gray-600 whitespace-nowrap">
-                        {formatDateTimeCH(ti.endDate, ti.endTime)}
-                      </td>
+                    {/* À */}
+                    <td className="px-2 py-2">
+                      <span className="text-xs text-gray-700">{wpLabel(row.toWp, row.toIndex)}</span>
+                    </td>
 
-                      {/* Pause */}
-                      <td className="px-2 py-2 text-right">
+                    {/* km */}
+                    <td className="px-2 py-2 text-right font-medium text-gray-700 text-xs">
+                      {row.distKm > 0 ? row.distKm.toFixed(1) : <span className="text-gray-300">—</span>}
+                    </td>
+
+                    {/* Durée */}
+                    <td className="px-2 py-2 text-right">
+                      {row.type === 'group' ? (
+                        <DurInput
+                          value={row.durationH}
+                          onChange={v => onUpdateGroup(row.groupId!, { manualDurationH: v })}
+                        />
+                      ) : (
+                        <DurInput
+                          value={row.durationH}
+                          onChange={v => onSegmentDurationChange(row.toIndex, v)}
+                        />
+                      )}
+                    </td>
+
+                    {/* Vitesse */}
+                    <td className="px-2 py-2 text-right">
+                      {row.type === 'group' ? (
                         <input
                           type="number"
-                          min="0"
-                          step="0.25"
-                          value={row.pauseH}
-                          onChange={e => updateRow(row.id, { pauseH: Number(e.target.value) })}
-                          className="border border-gray-200 rounded px-1 py-0.5
-                                     text-xs text-right w-16
-                                     focus:border-indigo-400 focus:outline-none"
+                          min={1}
+                          max={300}
+                          step={1}
+                          value={Math.round(row.speedKmh)}
+                          onChange={e => onUpdateGroup(row.groupId!, {
+                            speedKmh: Math.max(1, Math.round(Number(e.target.value))),
+                          })}
+                          onFocus={e => e.target.select()}
+                          className="w-14 border border-gray-300 rounded px-1 py-0.5
+                                     text-xs text-right focus:border-indigo-400 focus:outline-none"
                         />
-                      </td>
-
-                      {/* Remarque */}
-                      <td className="px-2 py-2">
+                      ) : (
                         <input
-                          type="text"
-                          value={row.remark}
-                          onChange={e => updateRow(row.id, { remark: e.target.value })}
-                          placeholder="…"
-                          className="border border-gray-200 rounded px-1 py-0.5
-                                     text-xs w-36
-                                     focus:border-indigo-400 focus:outline-none"
+                          type="number"
+                          min={1}
+                          max={300}
+                          step={1}
+                          value={Math.round(row.speedKmh)}
+                          onChange={e => onSegmentSpeedChange(row.toIndex, Math.max(1, Math.round(Number(e.target.value))))}
+                          onFocus={e => e.target.select()}
+                          className="w-14 border border-gray-300 rounded px-1 py-0.5
+                                     text-xs text-right focus:border-indigo-400 focus:outline-none"
                         />
-                      </td>
+                      )}
+                    </td>
 
-                      {/* Supprimer */}
-                      <td className="px-2 py-2 text-center">
+                    {/* Début */}
+                    <td className="px-2 py-2 text-xs text-gray-600 whitespace-nowrap">
+                      {formatDateTimeCH(row.beginDate, row.beginTime)}
+                    </td>
+
+                    {/* Fin */}
+                    <td className="px-2 py-2 text-xs text-gray-600 whitespace-nowrap">
+                      {formatDateTimeCH(row.endDate, row.endTime)}
+                    </td>
+
+                    {/* Pause */}
+                    <td className="px-2 py-2 text-right">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.25"
+                        value={row.pauseH}
+                        onChange={e => {
+                          const v = Math.max(0, Number(e.target.value));
+                          if (row.type === 'group') {
+                            onUpdateGroup(row.groupId!, { pauseH: v });
+                          } else {
+                            onSegmentPauseChange(row.toIndex, v);
+                          }
+                        }}
+                        onFocus={e => e.target.select()}
+                        className="border border-gray-200 rounded px-1 py-0.5
+                                   text-xs text-right w-16
+                                   focus:border-indigo-400 focus:outline-none"
+                      />
+                    </td>
+
+                    {/* Remarque */}
+                    <td className="px-2 py-2">
+                      <input
+                        type="text"
+                        value={row.remark}
+                        onChange={e => {
+                          if (row.type === 'group') {
+                            onUpdateGroup(row.groupId!, { remark: e.target.value });
+                          } else {
+                            onSegmentRemarkChange(row.toIndex, e.target.value);
+                          }
+                        }}
+                        placeholder="…"
+                        onFocus={e => e.target.select()}
+                        className="border border-gray-200 rounded px-1 py-0.5
+                                   text-xs w-36
+                                   focus:border-indigo-400 focus:outline-none"
+                      />
+                    </td>
+
+                    {/* Supprimer (uniquement pour les groupes) */}
+                    <td className="px-2 py-2 text-center">
+                      {row.type === 'group' && (
                         <button
-                          onClick={() => removeRow(row.id)}
+                          onClick={() => onRemoveGroup(row.groupId!)}
                           className="text-gray-300 hover:text-red-500 transition-colors text-lg leading-none"
                         >
                           ×
                         </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                      )}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}
@@ -543,24 +541,14 @@ const PlanningModal = ({
         <div className="flex items-center justify-between px-6 py-4
                         border-t border-gray-200 bg-gray-50 rounded-b-2xl">
           <button
-            onClick={addRow}
-            disabled={waypoints.length < 2}
+            disabled
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
-                       bg-indigo-100 text-indigo-700 hover:bg-indigo-200
-                       disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                       bg-gray-100 text-gray-400 cursor-not-allowed"
           >
-            + Ajouter une étape
+            + Ajouter une étape (via groupes)
           </button>
 
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => { if (confirm('Effacer toutes les étapes ?')) setRows([]); }}
-              disabled={rows.length === 0}
-              className="px-3 py-2 rounded-lg text-xs text-red-500
-                         hover:bg-red-50 disabled:opacity-40 transition-colors"
-            >
-              🗑️ Tout effacer
-            </button>
             <button
               onClick={onClose}
               className="px-4 py-2 rounded-lg text-sm text-gray-600
@@ -570,7 +558,7 @@ const PlanningModal = ({
             </button>
             <button
               onClick={() => { exportExcel(); }}
-              disabled={rows.length === 0}
+              disabled={displayRows.length === 0}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold
                          bg-green-500 text-white hover:bg-green-600 transition-colors
                          disabled:opacity-40 disabled:cursor-not-allowed shadow-md"

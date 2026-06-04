@@ -205,10 +205,28 @@ export function useGroups() {
     setGroups(prev => prev.filter(g => g.id !== groupId));
   }, []);
 
-  const updateGroup = useCallback((groupId: string, patch: Partial<Group>) => {
-    setGroups(prev => prev.map(g =>
-      g.id === groupId ? { ...g, ...patch } : g,
-    ));
+  const updateGroup = useCallback((
+    groupId: string,
+    patch: Partial<Group>,
+    segmentDistances?: number[],
+  ) => {
+    setGroups(prev => prev.map(g => {
+      if (g.id !== groupId) return g;
+      const updated = { ...g, ...patch };
+
+      if ('speedKmh' in patch) {
+        updated.manualDurationH = null;
+      }
+
+      if ('manualDurationH' in patch && patch.manualDurationH !== null && segmentDistances) {
+        const distKm = routingDistanceKm(segmentDistances, g.fromWpIndex, g.toWpIndex);
+        if (distKm > 0) {
+          updated.speedKmh = Math.round((distKm / (patch.manualDurationH as number)) * 10) / 10;
+        }
+      }
+
+      return updated;
+    }));
   }, []);
 
   const clearGroups = useCallback(() => {
@@ -252,6 +270,10 @@ export function useGroups() {
     ));
   }, []);
 
+  const resetAllDurations = useCallback((maxSpeed: number) => {
+    setGroups(prev => prev.map(g => ({ ...g, manualDurationH: null, speedKmh: maxSpeed })));
+  }, []);
+
   const removeWaypointFromGroup = useCallback((groupId: string, wpIndex: number) => {
     setGroups(prev => {
       const group = prev.find(g => g.id === groupId);
@@ -278,6 +300,7 @@ export function useGroups() {
     removeGroup,
     updateGroup,
     clearGroups,
+    resetAllDurations,
     rebaseGroups,
     mergeGroups,
     extendGroup,
