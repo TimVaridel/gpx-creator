@@ -91,6 +91,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, [loadProfile]);
 
+  // Revalidation de la session au retour sur l'onglet (contre le background throttling)
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible') {
+        const { error } = await supabase.auth.getUser();
+        if (error) {
+          supabase.auth.signOut().catch(() => {});
+          setUser(null);
+          setSession(null);
+          setProfile(null);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
   const signIn = useCallback(async (email: string, password: string): Promise<string | null> => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     return error?.message ?? null;

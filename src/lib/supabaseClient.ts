@@ -1,5 +1,6 @@
 // Client Supabase initialisé avec les variables d'environnement
 import { createClient } from '@supabase/supabase-js';
+import { memoryStorage } from './memoryStorage';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -12,7 +13,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: { persistSession: false },
+  auth: {
+    persistSession: true,
+    storage: memoryStorage,
+    autoRefreshToken: true,
+  },
   global: {
     fetch: (url, options) => {
       const ctrl = new AbortController();
