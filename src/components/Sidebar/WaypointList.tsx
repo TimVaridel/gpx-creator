@@ -53,7 +53,7 @@ function DurTextInput({ value, isManual, onChange, disabled }: {
         if (!isNaN(v) && v >= 0) onChange(Math.max(0, v));
       }}
       disabled={disabled}
-      className={`w-14 border rounded px-1 py-0 text-[10px] text-right
+      className={`w-10 border rounded px-1 py-0 text-[10px] text-right
         focus:outline-none focus:border-orange-400
         ${isManual
           ? 'border-orange-300 bg-orange-50 text-orange-600 font-semibold'
@@ -96,10 +96,11 @@ interface GroupRowProps {
   onExtend: (id: string, toWpIndex: number) => void;
   onToggleExpand: (id: string) => void;
   waypointCount: number;
+  compact?: boolean;
 }
 
 const GroupRow = ({
-  group, firstWpName, lastWpName, onRemove, onUpdate, onExtend, onToggleExpand, waypointCount,
+  group, firstWpName, lastWpName, onRemove, onUpdate, onExtend, onToggleExpand, waypointCount, compact,
 }: GroupRowProps) => {
   const {
     attributes, listeners, setNodeRef,
@@ -175,7 +176,6 @@ const GroupRow = ({
                   isManual={isManual}
                   onChange={v => onUpdate(group.id, { manualDurationH: v })}
                 />
-                <span className="text-[9px] text-gray-400">h</span>
               </>
             );
           })()}
@@ -196,30 +196,32 @@ const GroupRow = ({
           />
           <span className="text-[9px] text-gray-400">km/h</span>
 
-          <div className="ml-auto flex gap-1">
-            {group.fromWpIndex > 0 && (
-              <button
-                onClick={() => onExtend(group.id, group.fromWpIndex - 1)}
-                className="text-[9px] text-indigo-400 hover:text-indigo-600
-                           border border-dashed border-indigo-200 rounded px-1
-                           hover:bg-indigo-100 transition-colors"
-                title="Étendre au waypoint précédent"
-              >
-                ← étendre
-              </button>
-            )}
-            {hasNext && (
-              <button
-                onClick={() => onExtend(group.id, group.toWpIndex + 1)}
-                className="text-[9px] text-indigo-400 hover:text-indigo-600
-                           border border-dashed border-indigo-200 rounded px-1
-                           hover:bg-indigo-100 transition-colors"
-                title="Étendre au waypoint suivant"
-              >
-                étendre →
-              </button>
-            )}
-          </div>
+          {!compact && (
+            <div className="ml-auto flex gap-1">
+              {group.fromWpIndex > 0 && (
+                <button
+                  onClick={() => onExtend(group.id, group.fromWpIndex - 1)}
+                  className="text-[9px] text-indigo-400 hover:text-indigo-600
+                             border border-dashed border-indigo-200 rounded px-1
+                             hover:bg-indigo-100 transition-colors"
+                  title="Étendre au waypoint précédent"
+                >
+                  ← étendre
+                </button>
+              )}
+              {hasNext && (
+                <button
+                  onClick={() => onExtend(group.id, group.toWpIndex + 1)}
+                  className="text-[9px] text-indigo-400 hover:text-indigo-600
+                             border border-dashed border-indigo-200 rounded px-1
+                             hover:bg-indigo-100 transition-colors"
+                  title="Étendre au waypoint suivant"
+                >
+                  étendre →
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </li>
@@ -289,6 +291,8 @@ interface SortableItemProps {
   isGroupBoundary?: boolean;
   onRemoveFromGroup?: () => void;
   onAddGroup?: (fromWpIndex: number, toWpIndex: number) => void;
+  onSplitGroup?: (groupId: string, atWpIndex: number) => void;
+  groupId?: string;
   onWaypointClick?: (lat: number, lng: number) => void;
   compact?: boolean;
   savedPlaceName?: string;
@@ -298,7 +302,7 @@ const SortableItem = ({
   waypoint, index, total, onRemove, onUpdatePosition, onSavePlace,
   distFromPrev, durFromPrev, segSpeed, segDurationManual, onSpeedChange, onDurationChange, isInGroup,
   showSegmentConnector, isGroupBoundary, onRemoveFromGroup, onAddGroup,
-  onWaypointClick, compact, savedPlaceName,
+  onSplitGroup, groupId, onWaypointClick, compact, savedPlaceName,
 }: SortableItemProps) => {
   const {
     attributes, listeners, setNodeRef,
@@ -357,7 +361,6 @@ const SortableItem = ({
                           onChange={v => onDurationChange?.(v)}
                           disabled={isInGroup}
                         />
-                        <span className="text-[9px] text-gray-400">h</span>
                         <input
                           type="number"
                           min={1}
@@ -378,8 +381,8 @@ const SortableItem = ({
                   })()}
                 </>
               )}
-              {/* Bouton créer groupe */}
-              {!isInGroup && onAddGroup && index > 0 && (
+              {/* Bouton créer groupe (masqué en mode compact) */}
+              {!isInGroup && onAddGroup && index > 0 && !compact && (
                 <button
                   onClick={() => onAddGroup(index - 1, index)}
                   className="ml-auto text-[9px] text-gray-300 hover:text-indigo-500
@@ -387,7 +390,19 @@ const SortableItem = ({
                              rounded px-1 hover:bg-indigo-50 transition-colors"
                   title="Grouper ce segment"
                 >
-                  {compact ? '+' : '+ groupe'}
+                  + groupe
+                </button>
+              )}
+              {/* Bouton séparer (dans un groupe déplié, masqué en mode compact) */}
+              {isInGroup && onSplitGroup && groupId && index > 0 && !compact && (
+                <button
+                  onClick={() => onSplitGroup(groupId, index)}
+                  className="ml-auto text-[9px] text-orange-400 hover:text-orange-600
+                             border border-dashed border-orange-200 hover:border-orange-300
+                             rounded px-1 hover:bg-orange-50 transition-colors"
+                  title="Séparer le groupe à ce waypoint"
+                >
+                  séparer
                 </button>
               )}
             </div>
@@ -548,6 +563,7 @@ interface WaypointListProps {
   onExtendGroup: (groupId: string, toWpIndex: number) => void;
   onToggleGroupExpanded: (groupId: string) => void;
   onRemoveWaypointFromGroup: (groupId: string, wpIndex: number) => void;
+  onSplitGroup?: (groupId: string, atWpIndex: number) => void;
   onWaypointClick?: (lat: number, lng: number) => void;
   onMoveGroup?: (fromIndex: number, toIndex: number, count: number) => void;
   compact?: boolean;
@@ -573,6 +589,7 @@ const WaypointList = ({
   onExtendGroup,
   onToggleGroupExpanded,
   onRemoveWaypointFromGroup,
+  onSplitGroup,
   onWaypointClick,
   onMoveGroup,
   compact,
@@ -715,7 +732,6 @@ const WaypointList = ({
                         isManual={segManual !== null}
                         onChange={v => onSegmentDurationChange?.(i, v)}
                       />
-                      <span className="text-[9px] text-gray-400">h</span>
                       <input
                         type="number"
                         min={1}
@@ -748,6 +764,7 @@ const WaypointList = ({
             onExtend={onExtendGroup}
             onToggleExpand={onToggleGroupExpanded}
             waypointCount={total}
+            compact={compact}
           />
         );
 
@@ -767,6 +784,8 @@ const WaypointList = ({
               isGroupBoundary={true}
               onRemoveFromGroup={() => onRemoveWaypointFromGroup(group.id, i)}
               onAddGroup={undefined}
+              onSplitGroup={onSplitGroup}
+              groupId={group.id}
               onWaypointClick={onWaypointClick}
               compact={compact}
               savedPlaceName={findSavedPlace(waypoints[i].lat, waypoints[i].lng)?.name}
@@ -813,6 +832,8 @@ const WaypointList = ({
               : undefined
           }
           onAddGroup={!isInGroup ? onAddGroup : undefined}
+          onSplitGroup={isInGroup && groupContaining?.expanded ? onSplitGroup : undefined}
+          groupId={groupContaining?.id}
           onWaypointClick={onWaypointClick}
           compact={compact}
           savedPlaceName={findSavedPlace(waypoints[i].lat, waypoints[i].lng)?.name}

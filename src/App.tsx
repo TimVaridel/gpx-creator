@@ -111,6 +111,7 @@ function MainApp() {
     toggleGroupExpanded,
     removeWaypointFromGroup,
     resetAllDurations,
+    splitGroup,
   } = useGroups();
 
   const { groupMetrics } = useGroupMetrics(
@@ -260,6 +261,14 @@ function MainApp() {
       case 'via-direct': insertDirectWaypoint(lat, lng, Math.max(1, route.waypoints.length - 1)); break;
     }
   };
+
+  // ── Suppression d'un waypoint (avec rebase des groupes) ───
+  const handleRemoveWaypoint = useCallback((id: string) => {
+    const oldWps = route.waypoints;
+    removeWaypoint(id);
+    const newWps = oldWps.filter(wp => wp.id !== id);
+    rebaseGroups(oldWps, newWps);
+  }, [route.waypoints, removeWaypoint, rebaseGroups]);
 
   // ── Import ───────────────────────────────────────────────
   const handleImport = (parsed: ParsedRoute) => {
@@ -502,7 +511,7 @@ function MainApp() {
           <WaypointList
             waypoints={route.waypoints}
             groups={groupMetrics}
-            onRemove={removeWaypoint}
+            onRemove={handleRemoveWaypoint}
             onReorder={(fromIndex, toIndex) => {
               const oldWps = [...route.waypoints];
               const newWps = [...oldWps];
@@ -527,6 +536,7 @@ function MainApp() {
             onExtendGroup={extendGroup}
             onToggleGroupExpanded={toggleGroupExpanded}
             onRemoveWaypointFromGroup={removeWaypointFromGroup}
+            onSplitGroup={splitGroup}
             onWaypointClick={handleWaypointClick}
             compact={!sidebarWide}
           />

@@ -111,7 +111,7 @@ function mergeOverlappingGroups(groups: Group[]): Group[] {
 
   for (const g of sorted) {
     const last = merged[merged.length - 1];
-    if (last && g.fromWpIndex <= last.toWpIndex + 1) {
+    if (last && g.fromWpIndex <= last.toWpIndex) {
       // Fusion : étendre le dernier groupe
       last.toWpIndex = Math.max(last.toWpIndex, g.toWpIndex);
       if (g.manualDurationH !== null) last.manualDurationH = g.manualDurationH;
@@ -122,6 +122,34 @@ function mergeOverlappingGroups(groups: Group[]): Group[] {
   }
 
   return merged;
+}
+
+/**
+ * Scinde un groupe en deux au waypoint atWpIndex.
+ * Exemple : groupe [0..4] scindé à 2 → groupe A [0..1] et groupe B [2..4].
+ * Si une moitié n'aurait qu'un seul waypoint, le groupe est simplement réduit.
+ */
+function splitGroup(groups: Group[], groupId: string, atWpIndex: number): Group[] {
+  const idx = groups.findIndex(g => g.id === groupId);
+  if (idx === -1) return groups;
+  const g = groups[idx];
+
+  const rest = groups.toSpliced(idx, 1);
+
+  const candidates: Group[] = [];
+
+  if (g.fromWpIndex === atWpIndex - 1) {
+    candidates.push({ ...g, fromWpIndex: atWpIndex });
+  } else if (g.toWpIndex === atWpIndex) {
+    candidates.push({ ...g, toWpIndex: atWpIndex - 1 });
+  } else {
+    candidates.push(
+      { ...g, id: `g-${generateId()}`, toWpIndex: atWpIndex - 1 },
+      { ...g, id: `g-${generateId()}`, fromWpIndex: atWpIndex },
+    );
+  }
+
+  return [...rest, ...candidates].filter(g => g.fromWpIndex < g.toWpIndex);
 }
 
 /**
@@ -251,17 +279,23 @@ export function useGroups() {
     setGroups(prev => mergeOverlappingGroups(prev));
   }, []);
 
+  const splitGroupCb = useCallback((groupId: string, atWpIndex: number) => {
+    setGroups(prev => splitGroup(prev, groupId, atWpIndex));
+  }, []);
+
   /**
    * Étend un groupe existant en incluant un waypoint adjacent
    */
   const extendGroup = useCallback((groupId: string, toWpIndex: number) => {
-    setGroups(prev => prev.map(g => {
-      if (g.id !== groupId) return g;
-
-      const newTo   = Math.max(g.toWpIndex, toWpIndex);
-      const newFrom = Math.min(g.fromWpIndex, toWpIndex);
-      return { ...g, fromWpIndex: newFrom, toWpIndex: newTo };
-    }));
+    setGroups(prev => {
+      const extended = prev.map(g => {
+        if (g.id !== groupId) return g;
+        const newTo   = Math.max(g.toWpIndex, toWpIndex);
+        const newFrom = Math.min(g.fromWpIndex, toWpIndex);
+        return { ...g, fromWpIndex: newFrom, toWpIndex: newTo };
+      });
+      return mergeOverlappingGroups(extended);
+    });
   }, []);
 
   const toggleGroupExpanded = useCallback((groupId: string) => {
@@ -306,6 +340,7 @@ export function useGroups() {
     extendGroup,
     toggleGroupExpanded,
     removeWaypointFromGroup,
+    splitGroup: splitGroupCb,
   };
 }
 
@@ -353,6 +388,7 @@ export {
   createGroup,
   rebaseGroupIndices,
   mergeOverlappingGroups,
+  splitGroup,
   computeGroupMetrics,
   computePlanningRows,
   routingDistanceKm,
