@@ -52,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Timeout de sécurité : force profileLoading=false après 5s
   useEffect(() => {
     if (!profileLoading) return;
-    const timer = setTimeout(() => setProfileLoading(false), 5000);
+    const timer = setTimeout(() => setProfileLoading(false), 3000);
     return () => clearTimeout(timer);
   }, [profileLoading]);
 

@@ -8,10 +8,10 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, profile, loading, profileLoading, signOut, refreshProfile } = useAuth();
   const [stuck, setStuck] = useState(false);
 
-  // Si profileLoading dure + de 3 s, on passe en mode "coincé"
+  // Si profileLoading dure + de 1 s, on passe en mode "coincé"
   useEffect(() => {
     if (profileLoading) {
-      const timer = setTimeout(() => setStuck(true), 3000);
+      const timer = setTimeout(() => setStuck(true), 1000);
       return () => clearTimeout(timer);
     }
     setStuck(false);
