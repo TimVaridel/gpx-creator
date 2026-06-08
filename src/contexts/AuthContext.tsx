@@ -33,9 +33,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loadProfile = useCallback(async (uid: string, email: string) => {
     setProfileLoading(true);
-    const p = await fetchProfile(uid, email);
-    setProfile(p);
-    setProfileLoading(false);
+    try {
+      const p = await fetchProfile(uid, email);
+      setProfile(p);
+    } catch {
+      setProfile(null);
+    } finally {
+      setProfileLoading(false);
+    }
   }, []);
 
   // Timeout de sécurité : force loading=false après 8s
@@ -43,6 +48,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const timer = setTimeout(() => setLoading(false), 8000);
     return () => clearTimeout(timer);
   }, []);
+
+  // Timeout de sécurité : force profileLoading=false après 5s
+  useEffect(() => {
+    if (!profileLoading) return;
+    const timer = setTimeout(() => setProfileLoading(false), 5000);
+    return () => clearTimeout(timer);
+  }, [profileLoading]);
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
@@ -57,12 +69,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_OUT') {
-        setProfile(null);
-      }
       setSession(session);
       setUser(session?.user ?? null);
-      if (session?.user) {
+      if (event === 'SIGNED_OUT') {
+        setProfile(null);
+        return;
+      }
+      if (session?.user && event !== 'TOKEN_REFRESHED') {
         try {
           await loadProfile(session.user.id, session.user.email ?? '');
         } catch {
@@ -94,9 +107,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshProfile = useCallback(async () => {
     if (user) {
       setProfileLoading(true);
-      const p = await fetchProfile(user.id, user.email ?? '');
-      setProfile(p);
-      setProfileLoading(false);
+      try {
+        const p = await fetchProfile(user.id, user.email ?? '');
+        setProfile(p);
+      } catch {
+        setProfile(null);
+      } finally {
+        setProfileLoading(false);
+      }
     }
   }, [user]);
 

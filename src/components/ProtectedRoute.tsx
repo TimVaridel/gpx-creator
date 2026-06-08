@@ -1,11 +1,21 @@
 // Garde de route — redirige vers /login si l'utilisateur n'est pas authentifié
 // Affiche un écran d'attente si le compte n'est pas encore approuvé
+import { useState, useEffect, type ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import type { ReactNode } from 'react';
 
 export default function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, profile, loading, profileLoading, signOut, refreshProfile } = useAuth();
+  const [stuck, setStuck] = useState(false);
+
+  // Si profileLoading dure + de 3 s, on passe en mode "coincé"
+  useEffect(() => {
+    if (profileLoading) {
+      const timer = setTimeout(() => setStuck(true), 3000);
+      return () => clearTimeout(timer);
+    }
+    setStuck(false);
+  }, [profileLoading]);
 
   if (loading) {
     return (
@@ -19,8 +29,8 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
     return <Navigate to="/login" replace />;
   }
 
-  // Profil en cours de chargement (après connexion)
-  if (profileLoading) {
+  // Profil en cours de chargement (max 3 s avant fallback)
+  if (profileLoading && !stuck) {
     return (
       <div className="flex items-center justify-center h-screen w-screen bg-gray-100">
         <div className="text-sm text-gray-500 animate-pulse">Chargement du profil…</div>
