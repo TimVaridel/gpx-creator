@@ -19,6 +19,7 @@ export const SAVED_PLACE_CATEGORIES: {
 
 export interface SavedPlace {
   id:         string;
+  user_id?:   string;
   name:       string;
   lat:        number;
   lng:        number;

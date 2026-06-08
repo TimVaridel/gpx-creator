@@ -57,11 +57,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [profileLoading]);
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await loadProfile(session.user.id, session.user.email ?? '');
+    supabase.auth.getUser().then(async ({ data: { user }, error }) => {
+      if (error || !user) {
+        setUser(null);
+        setSession(null);
+      } else {
+        setUser(user);
+        const { data: { session } } = await supabase.auth.getSession();
+        setSession(session);
+        await loadProfile(user.id, user.email ?? '');
       }
       setLoading(false);
     }).catch(() => {

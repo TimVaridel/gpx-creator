@@ -17,9 +17,12 @@ import { useRoute } from './hooks/useRoute';
 import { useGroups, useGroupMetrics } from './store/routeStore';
 import { generateExport } from './utils/exportGenerator';
 import type { ParsedRoute } from './services/importParser';
-import type { Group } from './types/route.types';
+import type { Group, Route as AppRoute, SavedRouteDB } from './types/route.types';
 import type { SavedPlaceCategory } from './types/savedPlace.types';
 import { SAVED_PLACE_CATEGORIES } from './types/savedPlace.types';
+import { saveRoute, getRouteByName } from './lib/savedRoutes';
+import { getAllPlaces } from './services/savedPlaces';
+import SavedRoutesModal from './components/SavedRoutesModal';
 
 export type MapLayer =
   | 'osm'
@@ -98,6 +101,7 @@ function MainApp() {
     clearGeometry,
     reverseRoute,
     importRoute,
+    replaceRoute,
   } = useRoute();
 
   // ── Groupes (nouveau système unifié) ──────────────────────────
@@ -112,6 +116,7 @@ function MainApp() {
     removeWaypointFromGroup,
     resetAllDurations,
     splitGroup,
+    setAllGroups,
   } = useGroups();
 
   const { groupMetrics } = useGroupMetrics(
@@ -135,9 +140,17 @@ function MainApp() {
   const [segmentRemark,           setSegmentRemark]           = useState<string[]>([]);
   const [showMapMenu,             setShowMapMenu]             = useState(false);
   const [showExceptionalRoutes,   setShowExceptionalRoutes]   = useState(false);
+  const [savedRouteId,     setSavedRouteId]     = useState<string | null>(null);
+  const [showSavedRoutes,  setShowSavedRoutes]  = useState(false);
+  const [toast,            setToast]            = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2000);
+  }, []);
 
   // ── Mode d'insertion (Fonctionnalité 3) ──────────────────
-  const [insertMode, setInsertMode] = useState<InsertMode>('via');
+  const [insertMode, setInsertMode] = useState<InsertMode>('end');
 
   // ── Menus lieux enregistrés (Fonctionnalité 2) ───────────
   type OpenMenu = 'all' | SavedPlaceCategory;
@@ -154,6 +167,8 @@ function MainApp() {
 
   // ── Ref vers l'API impérative de la carte ────────────────
   const mapRef = useRef<MapViewHandle>(null);
+  const loadedRouteNameRef = useRef<string | null>(null);
+  const draftIdRef = useRef<string | null>(null);
 
   const pendingFlyTo = useRef<{ lat: number; lng: number } | null>(null);
 
@@ -194,6 +209,36 @@ function MainApp() {
       pendingFlyTo.current = null;
     }
   }, [route.routeGeometry]);
+
+  // ── Auto-save BROUILLON dans Supabase ────────────────────
+  useEffect(() => {
+    if (!user || route.waypoints.length === 0) return;
+    const timer = setTimeout(async () => {
+      let targetId = draftIdRef.current;
+      if (!targetId) {
+        const existing = await getRouteByName('BROUILLON', user.id);
+        targetId = existing?.id ?? null;
+      }
+      const id = await saveRoute({
+        id: targetId,
+        user_id: user.id,
+        name: 'BROUILLON',
+        profile: route.profile,
+        max_speed: maxSpeed,
+        waypoints: route.waypoints,
+        groups,
+        route_geometry: route.routeGeometry ?? null,
+        total_distance: route.totalDistance ?? 0,
+        duration: route.duration ?? 0,
+        segment_speeds: segmentSpeeds,
+        manual_segment_duration: manualSegmentDuration,
+        segment_pause: segmentPause,
+        segment_remark: segmentRemark,
+      });
+      if (id) draftIdRef.current = id;
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [user, route, groups, segmentSpeeds, manualSegmentDuration, segmentPause, segmentRemark, maxSpeed]);
 
   // ── Stats ────────────────────────────────────────────────
   const distanceKm = route.totalDistance
@@ -269,6 +314,78 @@ function MainApp() {
     const newWps = oldWps.filter(wp => wp.id !== id);
     rebaseGroups(oldWps, newWps);
   }, [route.waypoints, removeWaypoint, rebaseGroups]);
+
+  // ── Sauvegarde en ligne ───────────────────────────────────
+  const handleSave = useCallback(async () => {
+    if (!user) return;
+
+    let targetId: string | null | undefined = savedRouteId;
+    let finalName = route.name;
+
+    // Si le nom a changé depuis le chargement, créer un nouveau parcours
+    if (savedRouteId && route.name !== loadedRouteNameRef.current) {
+      targetId = null;
+    }
+
+    // Vérifier les conflits de nom
+    const existing = await getRouteByName(route.name, user.id, targetId ?? undefined);
+    if (existing) {
+      if (confirm(`Un itinéraire nommé « ${route.name} » existe déjà. Écraser ?`)) {
+        targetId = existing.id;
+      } else {
+        let suffix = 2;
+        while (await getRouteByName(`${route.name} (${suffix})`, user.id)) {
+          suffix++;
+        }
+        finalName = `${route.name} (${suffix})`;
+        targetId = null;
+      }
+    }
+
+    const id = await saveRoute({
+      id: targetId,
+      user_id: user.id,
+      name: finalName,
+      profile: route.profile,
+      max_speed: maxSpeed,
+      waypoints: route.waypoints,
+      groups,
+      route_geometry: route.routeGeometry ?? null,
+      total_distance: route.totalDistance ?? 0,
+      duration: route.duration ?? 0,
+      segment_speeds: segmentSpeeds,
+      manual_segment_duration: manualSegmentDuration,
+      segment_pause: segmentPause,
+      segment_remark: segmentRemark,
+    });
+    if (id) { setSavedRouteId(id); showToast('Sauvegardé ✔'); }
+    else showToast("Erreur lors de l'enregistrement");
+  }, [user, savedRouteId, route, maxSpeed, groups, segmentSpeeds,
+      manualSegmentDuration, segmentPause, segmentRemark, showToast]);
+
+  const handleLoadRoute = useCallback(async (data: SavedRouteDB) => {
+    const places = await getAllPlaces();
+    replaceRoute({
+      name: data.name,
+      profile: data.profile as AppRoute['profile'],
+      waypoints: data.waypoints,
+      routeGeometry: data.route_geometry ?? undefined,
+      totalDistance: data.total_distance,
+      duration: data.duration,
+    }, places);
+    setSegmentSpeeds(data.segment_speeds);
+    setManualSegmentDuration(data.manual_segment_duration);
+    setSegmentPause(data.segment_pause);
+    setSegmentRemark(data.segment_remark);
+    setMaxSpeed(data.max_speed);
+    setAllGroups(data.groups);
+    loadedRouteNameRef.current = data.name;
+    if (data.name === 'BROUILLON') {
+      setSavedRouteId(null);
+    } else {
+      setSavedRouteId(data.id);
+    }
+  }, [replaceRoute, setAllGroups]);
 
   // ── Import ───────────────────────────────────────────────
   const handleImport = (parsed: ParsedRoute) => {
@@ -493,6 +610,16 @@ function MainApp() {
           >
             {autoCalculate ? '🔄 Auto ON' : '⏸ Auto OFF'}
           </button>
+          {route.routeGeometry && route.routeGeometry.length > 0 && (
+            <button
+              onClick={() => { if (route.routeGeometry) mapRef.current?.fitRoute(route.routeGeometry); }}
+              className="flex-1 py-1 rounded text-xs font-medium
+                         bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200"
+              title="Centrer la vue sur l'itinéraire complet"
+            >
+              📍 Centrer
+            </button>
+          )}
           {!autoCalculate && route.waypoints.length >= 2 && (
             <button
               onClick={triggerCalculate}
@@ -660,6 +787,27 @@ function MainApp() {
                   : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
             >
               ⚙️ Export
+            </button>
+          </div>
+
+          {/* Ligne 1b : Sauvegarde en ligne */}
+          <div className="grid grid-cols-2 gap-1">
+            <button
+              onClick={handleSave}
+              disabled={route.waypoints.length < 2}
+              className="py-1.5 px-1 rounded-lg text-xs font-medium
+                         text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200
+                         disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              💾 Sauver
+            </button>
+            <button
+              onClick={() => setShowSavedRoutes(true)}
+              className="py-1.5 px-1 rounded-lg text-xs font-medium
+                         text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200
+                         transition-colors"
+            >
+              📂 Ouvrir
             </button>
           </div>
 
@@ -858,6 +1006,21 @@ function MainApp() {
           routeName={route.name}
           onClose={() => setShowPlanningModal(false)}
         />
+      )}
+
+      {showSavedRoutes && (
+        <SavedRoutesModal
+          onLoad={handleLoadRoute}
+          onClose={() => setShowSavedRoutes(false)}
+        />
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9999]
+                        bg-gray-800 text-white text-xs font-medium
+                        rounded-lg shadow-lg px-4 py-2 animate-pulse">
+          {toast}
+        </div>
       )}
     </div>
   );

@@ -328,6 +328,10 @@ export function useGroups() {
     });
   }, []);
 
+  const setAllGroups = useCallback((newGroups: Group[]) => {
+    setGroups(newGroups);
+  }, []);
+
   return {
     groups,
     addGroup,
@@ -341,6 +345,7 @@ export function useGroups() {
     toggleGroupExpanded,
     removeWaypointFromGroup,
     splitGroup: splitGroupCb,
+    setAllGroups,
   };
 }
 

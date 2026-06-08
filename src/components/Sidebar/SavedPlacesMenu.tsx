@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { SavedPlace, SavedPlaceCategory } from '../../types/savedPlace.types';
 import { SAVED_PLACE_CATEGORIES } from '../../types/savedPlace.types';
 import { getAllPlaces, deletePlace } from '../../services/savedPlaces';
+import { supabase } from '../../lib/supabase';
 import EditPlaceModal from './EditPlaceModal';
 
 interface Props {
@@ -19,10 +20,12 @@ export default function SavedPlacesMenu({
   onClose,
   categoryFilter,
 }: Props) {
-  const [places,      setPlaces]      = useState<SavedPlace[]>([]);
-  const [loading,     setLoading]     = useState(true);
-  const [search,      setSearch]      = useState('');
-  const [editingPlace, setEditingPlace] = useState<SavedPlace | null>(null);
+  const [places,       setPlaces]      = useState<SavedPlace[]>([]);
+  const [loading,      setLoading]     = useState(true);
+  const [search,       setSearch]      = useState('');
+  const [showAll,      setShowAll]     = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [editingPlace, setEditingPlace]  = useState<SavedPlace | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   // Position calculée directement depuis anchorEl — pas de useEffect+setState
@@ -33,20 +36,23 @@ export default function SavedPlacesMenu({
       })()
     : { bottom: 0, left: 0 };
 
-  const load = useCallback(() => {
+  const load = useCallback((userId: string | null, all: boolean) => {
     setLoading(true);
-    getAllPlaces()
+    getAllPlaces(all ? undefined : userId ?? undefined)
       .then(data => setPlaces(data))
       .catch(() => setPlaces([]))
       .finally(() => setLoading(false));
   }, []);
 
-  // Chargement initial — load est stable (useCallback sans deps),
-  // on l'appelle dans un timeout pour sortir du corps synchrone de l'effet
+  // Récupérer l'utilisateur courant et charger les lieux
   useEffect(() => {
-    const id = setTimeout(load, 0);
-    return () => clearTimeout(id);
-  }, [load]);
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      const uid = user?.id ?? null;
+      setCurrentUserId(uid);
+      const id = setTimeout(() => load(uid, showAll), 0);
+      return () => clearTimeout(id);
+    });
+  }, [load, showAll]);
 
   // Fermer sur clic extérieur (ne se déclenche pas si le modal d'édition est ouvert)
   useEffect(() => {
@@ -75,7 +81,7 @@ export default function SavedPlacesMenu({
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Supprimer « ${name} » ?`)) return;
     await deletePlace(id);
-    load();
+    load(currentUserId, showAll);
   };
 
   // Libellé du header selon le filtre actif
@@ -103,12 +109,35 @@ export default function SavedPlacesMenu({
           {/* Header */}
           <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
             <span className="text-xs font-bold text-gray-700">{headerLabel}</span>
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 text-lg leading-none"
-            >
-              ×
-            </button>
+            <div className="flex items-center gap-1">
+              {/* Toggle Mes lieux / Tous les lieux */}
+              <button
+                onClick={() => setShowAll(false)}
+                className={`text-[10px] px-1.5 py-0.5 rounded font-medium transition-colors ${
+                  !showAll
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                Mes lieux
+              </button>
+              <button
+                onClick={() => setShowAll(true)}
+                className={`text-[10px] px-1.5 py-0.5 rounded font-medium transition-colors ${
+                  showAll
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                Tous
+              </button>
+              <button
+                onClick={onClose}
+                className="text-gray-400 hover:text-gray-600 text-lg leading-none ml-1"
+              >
+                ×
+              </button>
+            </div>
           </div>
 
           {/* Recherche */}
@@ -156,32 +185,36 @@ export default function SavedPlacesMenu({
                           </p>
                         </button>
 
-                        {/* Modifier (nom + catégorie) */}
-                        <button
-                          onClick={e => { e.stopPropagation(); setEditingPlace(p); }}
-                          className="text-gray-300 hover:text-blue-500 transition-colors
-                                     flex-shrink-0 opacity-0 group-hover:opacity-100"
-                          title="Modifier"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3"
-                               fill="none" viewBox="0 0 24 24"
-                               stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round"
-                                  d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 012.828
-                                     0l.172.172a2 2 0 010 2.828L12 16H9v-3z"/>
-                          </svg>
-                        </button>
+                        {/* Modifier (nom + catégorie) — seulement ses propres lieux */}
+                        {p.user_id === currentUserId && (
+                          <button
+                            onClick={e => { e.stopPropagation(); setEditingPlace(p); }}
+                            className="text-gray-300 hover:text-blue-500 transition-colors
+                                       flex-shrink-0 opacity-0 group-hover:opacity-100"
+                            title="Modifier"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3"
+                                 fill="none" viewBox="0 0 24 24"
+                                 stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round"
+                                    d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 012.828
+                                       0l.172.172a2 2 0 010 2.828L12 16H9v-3z"/>
+                            </svg>
+                          </button>
+                        )}
 
-                        {/* Supprimer */}
-                        <button
-                          onClick={e => { e.stopPropagation(); handleDelete(p.id, p.name); }}
-                          className="text-gray-300 hover:text-red-500 transition-colors
-                                     flex-shrink-0 opacity-0 group-hover:opacity-100
-                                     text-base leading-none"
-                          title="Supprimer"
-                        >
-                          ×
-                        </button>
+                        {/* Supprimer — seulement ses propres lieux */}
+                        {p.user_id === currentUserId && (
+                          <button
+                            onClick={e => { e.stopPropagation(); handleDelete(p.id, p.name); }}
+                            className="text-gray-300 hover:text-red-500 transition-colors
+                                       flex-shrink-0 opacity-0 group-hover:opacity-100
+                                       text-base leading-none"
+                            title="Supprimer"
+                          >
+                            ×
+                          </button>
+                        )}
                       </div>
                     </li>
                   );
@@ -200,7 +233,7 @@ export default function SavedPlacesMenu({
           onClose={() => setEditingPlace(null)}
           onSaved={() => {
             setEditingPlace(null);
-            load(); // Rafraîchit la liste après modification
+            load(currentUserId, showAll); // Rafraîchit la liste après modification
           }}
         />
       )}

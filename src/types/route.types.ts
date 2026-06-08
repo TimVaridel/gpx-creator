@@ -73,3 +73,23 @@ export interface PlanningRow {
 }
 
 export type DrawingMode   = 'idle'      | 'drawing'        | 'editing';
+
+/** Ligne complète de la table saved_routes */
+export interface SavedRouteDB {
+  id: string;
+  user_id: string;
+  name: string;
+  profile: string;
+  max_speed: number;
+  waypoints: Waypoint[];
+  groups: Group[];
+  route_geometry: [number, number][] | null;
+  total_distance: number;
+  duration: number;
+  segment_speeds: number[];
+  manual_segment_duration: (number | null)[];
+  segment_pause: number[];
+  segment_remark: string[];
+  created_at: string;
+  updated_at: string;
+}

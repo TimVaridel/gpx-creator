@@ -1,11 +1,10 @@
 import { supabase } from '../lib/supabase';
 import type { SavedPlace, SavedPlaceCategory } from '../types/savedPlace.types';
 
-export async function getAllPlaces(): Promise<SavedPlace[]> {
-  const { data, error } = await supabase
-    .from('saved_places')
-    .select('*')
-    .order('name');
+export async function getAllPlaces(userId?: string): Promise<SavedPlace[]> {
+  let query = supabase.from('saved_places').select('*').order('name');
+  if (userId) query = query.eq('user_id', userId);
+  const { data, error } = await query;
   if (error) throw error;
   return data as SavedPlace[];
 }
@@ -37,9 +36,12 @@ export async function savePlace(
   lng: number,
   category: SavedPlaceCategory = '',
 ): Promise<SavedPlace> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Non authentifié');
+
   const { data, error } = await supabase
     .from('saved_places')
-    .insert({ name, lat, lng, category })
+    .insert({ name, lat, lng, category, user_id: user.id })
     .select()
     .single();
   if (error) throw error;

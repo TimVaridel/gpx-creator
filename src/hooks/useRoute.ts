@@ -296,6 +296,46 @@ export const useRoute = () => {
     })();
   }, []);
 
+  const replaceRoute = useCallback((
+    data: {
+      name: string;
+      profile: RoutingProfile;
+      waypoints: Waypoint[];
+      routeGeometry?: [number, number][];
+      totalDistance?: number;
+      duration?: number;
+    },
+    savedPlaces?: { lat: number; lng: number; name: string }[],
+  ) => {
+    setRoute(prev => ({
+      ...prev,
+      name: data.name,
+      profile: data.profile,
+      waypoints: data.waypoints,
+      routeGeometry: data.routeGeometry,
+      totalDistance: data.totalDistance ?? 0,
+      duration: data.duration ?? 0,
+    }));
+    setSegmentDistances([]);
+    setSegmentDurations([]);
+
+    (async () => {
+      for (const wp of data.waypoints) {
+        if (!wp.locality) {
+          const locality = await reverseGeocode(wp.lat, wp.lng, savedPlaces);
+          if (locality) {
+            setRoute(prev => ({
+              ...prev,
+              waypoints: prev.waypoints.map(w =>
+                w.id === wp.id ? { ...w, locality } : w,
+              ),
+            }));
+          }
+        }
+      }
+    })();
+  }, []);
+
   return {
     route,
     isCalculating,
@@ -317,5 +357,6 @@ export const useRoute = () => {
     reverseRoute,
     setProfile,
     importRoute,
+    replaceRoute,
   };
 };
