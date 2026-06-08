@@ -11,4 +11,13 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: { persistSession: false },
+  global: {
+    fetch: (url, options) => {
+      const ctrl = new AbortController();
+      const id = setTimeout(() => ctrl.abort(), 5000);
+      return fetch(url, { ...options, signal: ctrl.signal }).finally(() => clearTimeout(id));
+    },
+  },
+});
