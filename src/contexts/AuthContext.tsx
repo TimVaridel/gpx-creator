@@ -31,6 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
   const userRef = useRef<User | null>(null);
+  const subRef = useRef<{ unsubscribe: () => void } | null>(null);
 
   useEffect(() => { userRef.current = user; }, [user]);
 
@@ -48,7 +49,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user }, error }) => {
-      console.log('[AUTH] getUser DONE', { userId: user?.id, error: error?.message, at: Date.now() });
       if (error || !user) {
         setUser(null);
         setSession(null);
@@ -62,21 +62,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await loadProfile(user.id, user.email ?? '');
       }
       setLoading(false);
-    }).catch((err) => {
-      console.warn('[AUTH] getUser CATCH', err?.message, Date.now());
+    }).catch(() => {
       setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('[AUTH] onAuthStateChange', event, { userId: session?.user?.id, at: Date.now() });
-
       if (event === 'TOKEN_REFRESHED') {
         if (session) setSession(session);
         return;
       }
 
       if (event === 'SIGNED_OUT') {
-        console.log('[AUTH] SIGNED_OUT', { at: Date.now() });
         setUser(null);
         setSession(null);
         setProfile(null);
@@ -85,7 +81,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (session?.user) {
         setSession(session);
-        // Déjà connecté avec le même user → ignorer SIGNED_IN de recovery (évite cascade)
         if (userRef.current && userRef.current.id === session.user.id) {
           return;
         }
@@ -100,24 +95,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
+    subRef.current = subscription;
     return () => subscription.unsubscribe();
   }, [loadProfile]);
 
-  // Log d'état auth à chaque changement significatif
-  useEffect(() => {
-    console.log('[AUTH] STATE', { user: !!user, profile: !!profile, loading, profileLoading, at: Date.now() });
-  }, [user, profile, loading, profileLoading]);
-
-  // Recrée le client Supabase au retour d'onglet (évite le _refreshTokenPromise bloqué)
+  // Recrée le client Supabase au retour d'onglet (nettoie l'ancien pour éviter l'accumulation)
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return;
-      console.log('[AUTH] Tab visible → recreating supabase client', { at: Date.now() });
+      subRef.current?.unsubscribe();
       recreateSupabaseClient();
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'TOKEN_REFRESHED') {
+          if (session) setSession(session);
+          return;
+        }
+
+        if (event === 'SIGNED_OUT') {
+          setUser(null);
+          setSession(null);
+          setProfile(null);
+          return;
+        }
+
+        if (session?.user) {
+          setSession(session);
+          if (userRef.current && userRef.current.id === session.user.id) {
+            return;
+          }
+          setUser(session.user);
+          if (event !== 'INITIAL_SESSION') {
+            try {
+              await loadProfile(session.user.id, session.user.email ?? '');
+            } catch {
+              // échec silencieux
+            }
+          }
+        }
+      });
+      subRef.current = subscription;
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      subRef.current?.unsubscribe();
+    };
+  }, [loadProfile]);
 
   const signIn = useCallback(async (email: string, password: string): Promise<string | null> => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });

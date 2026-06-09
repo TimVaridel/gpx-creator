@@ -2,11 +2,9 @@ import { supabase } from '../lib/supabase';
 import type { SavedPlace, SavedPlaceCategory } from '../types/savedPlace.types';
 
 export async function getAllPlaces(userId?: string): Promise<SavedPlace[]> {
-  console.log('[PLACES] getAllPlaces START', { userId, at: Date.now() });
   let query = supabase.from('saved_places').select('*').order('name');
   if (userId) query = query.eq('user_id', userId);
   const { data, error } = await query;
-  console.log('[PLACES] getAllPlaces DONE', { count: data?.length, error: error?.message, at: Date.now() });
   if (error) throw error;
   return data as SavedPlace[];
 }

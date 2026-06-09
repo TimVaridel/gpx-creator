@@ -9,13 +9,11 @@ export interface SavedRouteListItem {
 }
 
 export async function listSavedRoutes(): Promise<SavedRouteListItem[]> {
-  console.log('[ROUTES] listSavedRoutes START', { at: Date.now() });
   const { data, error } = await supabase
     .from('saved_routes')
     .select('id, name, waypoints, updated_at')
     .order('updated_at', { ascending: false });
 
-  console.log('[ROUTES] listSavedRoutes DONE', { count: data?.length, error: error?.message, at: Date.now() });
   if (error) { console.error('listSavedRoutes error', error); return []; }
 
   return (data ?? []).map((r: Record<string, unknown>) => ({

@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler pages deploy dist --project-name gpx-creator"
+    "deploy": "npm run build && wrangler pages deploy dist --project-name gpx-creator-v2"
   },
   "dependencies": {
     "@dnd-kit/accessibility": "^3.1.1",
