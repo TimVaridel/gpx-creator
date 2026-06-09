@@ -1,0 +1,21 @@
+WebAppGPX — Résumé applicatif
+Nature
+Application web monopage (Cloudflare Pages, React 19 + Vite 8 + TypeScript 6) de création/édition d'itinéraires GPX. Pas de serveur Node.js, tout est client-side.
+Authentification
+- Supabase Auth (email/password) avec session en RAM (memoryStorage, pas localStorage)
+- Validation par admin : table profiles, champ approved, handle_new_user trigger PostgreSQL
+- RLS sur toutes les tables avec is_admin() SECURITY DEFINER
+Fonctionnalités principales
+1. Carte (Leaflet) + sidebar avec liste de waypoints drag-and-drop (@dnd-kit)
+2. Groupes de waypoints : créer (Shift+drag), étendre, scinder, dissoudre, réordonner, vitesse/durée personnalisée, déplier/replier — logique dans routeStore.ts
+3. Calcul d'itinéraire via OSRM (public API, pas de clé)
+4. Sauvegarde en ligne : table saved_routes JSONB, auto-save BROUILLON (debounce 2s), CRUD avec modal
+5. Lieux enregistrés : table saved_places, toggle Mes/Tous, Edit/Delete conditionnel
+6. Géocodage inverse via proxy Nominatim (Pages Function + proxy Vite dev) avec cache 3 niveaux (mémoire, saved_places, locality_cache Supabase)
+Problème résolu : background tab throttling
+- Symptôme : les requêtes Supabase pendaient après changement d'onglet (timer interne autoRefreshToken bloqué par Chrome)
+- Solution : recreateSupabaseClient() au retour d'onglet + userRef pour filtrer les SIGNED_IN redondants — nouveau client Supabase = état interne vierge, pas de destruction de l'état React
+Conventions
+- UI en français, generateId() maison, pas de librairie UI externe (Tailwind v3)
+- TypeScript strict : verbatimModuleSyntax, erasableSyntaxOnly, noUnusedLocals
+- Pas de test runner, pas de Zustand — useState + hooks personnalisés

@@ -1,0 +1,98 @@
+WebAppGPX — État complet de l'application
+Stack technique
+- React 19 + TypeScript 6.0 (strict : verbatimModuleSyntax, erasableSyntaxOnly, noUnusedLocals, noUnusedParameters)
+- Vite 8 avec @cloudflare/vite-plugin v1.36.3 pour le dev
+- Cloudflare Pages (SPA, not_found_handling: single-page-application, nodejs_compat)
+- Tailwind v3 (PostCSS), pas de librairie UI externe
+- Pas de test runner, pas de Zustand — useState + hooks personnalisés
+Arborescence
+src/
+├── App.tsx                    # Root : sidebar (WaypointList) + map (MapView) + modals
+├── main.tsx                   # Entry point
+├── contexts/
+│   └── AuthContext.tsx         # AuthProvider + useAuth hook
+├── components/
+│   ├── ProtectedRoute.tsx      # Garde de route auth
+│   ├── MapView.tsx             # Carte Leaflet
+│   ├── LoginPage.tsx           # Connexion
+│   ├── RegisterPage.tsx        # Inscription
+│   ├── AdminPage.tsx           # Approbation des comptes
+│   ├── SavedRoutesModal.tsx    # Liste/chargement/suppression parcours
+│   └── Sidebar/
+│       ├── WaypointList.tsx    # Liste waypoints + groupes
+│       ├── SavedPlacesMenu.tsx # Lieux enregistrés (toggle Mes/Tous)
+│       └── SavePlaceModal.tsx  # Ajout lieu
+├── hooks/
+│   └── useRoute.ts            # Source unique : waypoints, replaceRoute, enrichWithLocality
+├── store/
+│   └── routeStore.ts          # Groupes (merge, split, extend, setAllGroups) + PlanningRows
+├── services/
+│   ├── routingService.ts      # OSRM (public API, pas de clé)
+│   ├── geocoding.ts           # Reverse geocode (cache 3 niveaux)
+│   └── savedPlaces.ts         # CRUD saved_places
+├── lib/
+│   ├── supabaseClient.ts      # Client Supabase (memoryStorage, autoRefreshToken)
+│   ├── supabase.ts            # Ré-export compat
+│   ├── memoryStorage.ts       # Stockage RAM pour tokens (getItem/setItem/removeItem)
+│   ├── savedRoutes.ts         # CRUD saved_routes
+│   ├── geocache.ts            # CRUD locality_cache
+│   └── profiles.ts            # CRUD profils + ensureProfile (upsert)
+├── types/
+│   ├── route.types.ts         # Waypoint, Route, Group, SavedRouteDB
+│   ├── profile.types.ts       # Profile
+│   └── savedPlace.types.ts    # SavedPlace, SavedPlaceCategory
+└── ...
+functions/
+└── api/
+    └── nominatim.ts           # Pages Function proxy Nominatim
+supabase-migration.sql         # Tables + trigger + RLS
+vite.config.ts                 # Proxy dev /api/nominatim → Nominatim
+wrangler.jsonc                 # Config déploiement (surclasse wrangler.toml)
+Authentification (AuthContext.tsx)
+- Email/password via supabase.auth.signInWithPassword / signUp
+- Session stockée en RAM (memoryStorage), perdue au F5
+- autoRefreshToken: true — géré par Supabase
+- Cycle d'init :
+1. supabase.auth.getUser() → vérifie cookie auth
+2. onAuthStateChange → INITIAL_SESSION + SIGNED_IN (restauration via cookie)
+3. loadProfile() → ensureProfile() (upsert dans profiles)
+- RLS : is_admin() SECURITY DEFINER sur toutes les fonctions
+Fonctionnalités
+Waypoints : drag-and-drop (@dnd-kit), ajout/suppression, numérotation cercles colorés
+Groupes (routeStore.ts) :
+- Création : Shift+drag d'un waypoint sur un autre dans la sidebar
+- Opérations : extend, split, dissolve, reorder, fold/unfold
+- Métriques : vitesse personnalisée, durée, mergeOverlappingGroups, rebaseGroupIndices
+- Planning : lecture depuis les groupes (pas localStorage)
+Sauvegarde en ligne (lib/savedRoutes.ts) :
+- Table saved_routes (JSONB waypoints/groups/segment arrays)
+- Auto-save BROUILLON (debounce 2s) → pas de binding savedRouteId au chargement
+- Conflit de nom géré : vérification + auto-rename "(2)", "(3)" sur refus
+- CRUD via SavedRoutesModal (recherche, boutons 💾/📂)
+Lieux enregistrés (services/savedPlaces.ts) :
+- Table saved_places avec RLS (SELECT tous, INSERT/UPDATE/DELETE par owner)
+- Toggle Mes/Tous lieux, Edit/Delete masqué pour les autres
+Géocodage (services/geocoding.ts) :
+- Proxy Nominatim via Pages Function (prod) + proxy Vite (dev)
+- Rate limit 1.1s entre appels
+- Cache 3 niveaux : mémoire → saved_places → locality_cache Supabase
+Problème résolu : Background tab throttling
+- Cause : le timer interne autoRefreshToken de Supabase est throttlé par Chrome en arrière-plan → _refreshTokenPromise ne résout jamais → toutes les requêtes Supabase pendent
+- Solution : au retour d'onglet (visibilitychange), recreateSupabaseClient() crée une nouvelle instance Supabase (état interne vierge). Le userRef filtre les SIGNED_IN redondants émis par l'ancien client → pas de cascade React (unmount), les données de la route sont préservées
+- Mécanisme clé : export let supabase (live binding ES module) — tous les imports reçoivent automatiquement la nouvelle instance
+Dépendances clés
+- @supabase/supabase-js v2
+- react-leaflet + leaflet
+- @dnd-kit/core + @dnd-kit/sortable
+- react-router-dom v7
+- exceljs (export PlanningModal)
+Variables d'environnement (.env)
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+VITE_ORS_API_KEY=
+Commandes
+npm run dev          → Vite dev server (proxy /api/nominatim actif)
+npm run build        → tsc -b + vite build
+npm run lint         → ESLint flat config
+npm run preview      → build + wrangler dev
+npm run deploy       → build + wrangler deploy

@@ -30,7 +30,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
-  const [clientVersion, setClientVersion] = useState(0);
   const userRef = useRef<User | null>(null);
 
   useEffect(() => { userRef.current = user; }, [user]);
@@ -102,7 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     return () => subscription.unsubscribe();
-  }, [loadProfile, clientVersion]);
+  }, [loadProfile]);
 
   // Log d'état auth à chaque changement significatif
   useEffect(() => {
@@ -115,7 +114,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (document.visibilityState !== 'visible') return;
       console.log('[AUTH] Tab visible → recreating supabase client', { at: Date.now() });
       recreateSupabaseClient();
-      setClientVersion(v => v + 1);
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);

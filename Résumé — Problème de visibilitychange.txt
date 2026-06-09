@@ -1,0 +1,18 @@
+Résumé — Problème de visibilitychange
+Le symptôme
+Changement d'onglet → retour → les lieux/parcours affichent "Chargement…" indéfiniment. Aucune requête réseau Supabase. F5 obligatoire.
+Les mauvaises pistes (3 tentatives échouées)
+1. Supprimer le visibilitychange → le problème persistait. La cause n'était pas notre code.
+2. refreshSession() avec timeout 10s + fallback signOut → pareil. refreshSession() retournait la même promesse bloquée que le refresh interne de Supabase.
+3. Recréer le client + clientVersion → re-init complet → les requêtes Supabase fonctionnaient enfin, mais les données de la route en cours étaient perdues (getUser → unmount → state React effacé).
+La cause racine
+Le timer interne autoRefreshToken de Supabase-js utilise setTimeout. Quand l'onglet passe en arrière-plan, Chrome le throttle (jusqu'à 1 fois/minute). Au retour :
+1. Le timer est en train d'exécuter un refresh du token via _refreshAccessToken()
+2. _refreshTokenPromise est défini mais ne résout jamais (la requête HTTP est avortée/throttlée)
+3. Toutes les requêtes suivantes (getAllPlaces, listSavedRoutes, ensureProfile) retournent cette même promesse bloquée → "Chargement…" infini, zéro réseau
+La solution en 2 points
+Mécanisme	Effet
+recreateSupabaseClient() au retour d'onglet	Crée une nouvelle instance Supabase = état interne vierge, pas de _refreshTokenPromise bloqué. Tous les import { supabase } reçoivent la nouvelle instance (live binding ES module)
+userRef + filtre des SIGNED_IN redondants	L'ancien client émet encore des événements. Le userRef les ignore si le même user est déjà connecté → pas de cascade loadProfile → pas d'unmount React → les données en cours sont préservées
+Pourquoi userRef est indispensable
+Sans lui, les onAuthStateChange SIGNED_IN émis par l'ancien client déclenchent loadProfile() → profileLoading = true → ProtectedRoute affiche "Chargement du profil…" → les composants enfants sont démontés → leurs useState sont perdus. Le userRef coupe cette cascade en détectant que l'utilisateur est déjà authentifié.
