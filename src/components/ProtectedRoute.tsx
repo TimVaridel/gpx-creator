@@ -64,7 +64,7 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
   }
 
   // Profil introuvable (cas exceptionnel)
-  if (!profile) {
+  if (!profileLoading && !profile) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-indigo-500 to-purple-700 p-4">
         <div className="w-full max-w-sm bg-white rounded-2xl shadow-2xl p-8 text-center">

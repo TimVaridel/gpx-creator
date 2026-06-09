@@ -12,17 +12,18 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    storage: memoryStorage,
-    autoRefreshToken: true,
-  },
-  global: {
-    fetch: (url, options) => {
-      const ctrl = new AbortController();
-      const id = setTimeout(() => ctrl.abort(), 5000);
-      return fetch(url, { ...options, signal: ctrl.signal }).finally(() => clearTimeout(id));
+function buildClient() {
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: true,
+      storage: memoryStorage,
+      autoRefreshToken: true,
     },
-  },
-});
+  });
+}
+
+export let supabase = buildClient();
+
+export function recreateSupabaseClient() {
+  supabase = buildClient();
+}
