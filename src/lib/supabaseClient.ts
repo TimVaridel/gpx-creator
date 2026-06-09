@@ -22,8 +22,8 @@ function buildClient() {
   });
 }
 
-export let supabase = buildClient();
+export const supabase = buildClient();
 
-export function recreateSupabaseClient() {
-  supabase = buildClient();
+export function resetAuthRefreshPromise() {
+  (supabase.auth as any)._refreshTokenPromise = null;
 }

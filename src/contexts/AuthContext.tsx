@@ -1,7 +1,7 @@
 // Contexte d'authentification Supabase — état global user/session + méthodes
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
-import { supabase, recreateSupabaseClient } from '../lib/supabaseClient';
+import { supabase, resetAuthRefreshPromise } from '../lib/supabaseClient';
 import { ensureProfile } from '../lib/profiles';
 import type { User, Session } from '@supabase/supabase-js';
 import type { Profile } from '../types/profile.types';
@@ -31,7 +31,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
   const userRef = useRef<User | null>(null);
-  const subRef = useRef<{ unsubscribe: () => void } | null>(null);
 
   useEffect(() => { userRef.current = user; }, [user]);
 
@@ -95,52 +94,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    subRef.current = subscription;
     return () => subscription.unsubscribe();
   }, [loadProfile]);
 
-  // Recrée le client Supabase au retour d'onglet (nettoie l'ancien pour éviter l'accumulation)
+  // Réinitialise la promesse de refresh bloquée au retour d'onglet
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return;
-      subRef.current?.unsubscribe();
-      recreateSupabaseClient();
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (event === 'TOKEN_REFRESHED') {
-          if (session) setSession(session);
-          return;
-        }
-
-        if (event === 'SIGNED_OUT') {
-          setUser(null);
-          setSession(null);
-          setProfile(null);
-          return;
-        }
-
-        if (session?.user) {
-          setSession(session);
-          if (userRef.current && userRef.current.id === session.user.id) {
-            return;
-          }
-          setUser(session.user);
-          if (event !== 'INITIAL_SESSION') {
-            try {
-              await loadProfile(session.user.id, session.user.email ?? '');
-            } catch {
-              // échec silencieux
-            }
-          }
-        }
-      });
-      subRef.current = subscription;
+      resetAuthRefreshPromise();
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      subRef.current?.unsubscribe();
-    };
-  }, [loadProfile]);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   const signIn = useCallback(async (email: string, password: string): Promise<string | null> => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
